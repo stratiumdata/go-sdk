@@ -3,8 +3,11 @@ package stratium
 import (
 	"context"
 	"fmt"
+	"time"
 
+	keymanager "github.com/stratiumdata/go-sdk/gen/services/key-manager"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // KeyManagerClient provides methods for interacting with the Key Manager service.
@@ -17,9 +20,7 @@ type KeyManagerClient struct {
 	conn   *grpc.ClientConn
 	config *Config
 	auth   *authManager
-
-	// TODO: Add generated proto client when available
-	// client keymanager.KeyManagerServiceClient
+	client keymanager.KeyManagerServiceClient
 }
 
 // KeyType represents the type of cryptographic key.
@@ -86,7 +87,7 @@ func newKeyManagerClient(conn *grpc.ClientConn, config *Config, auth *authManage
 		conn:   conn,
 		config: config,
 		auth:   auth,
-		// client: keymanager.NewKeyManagerServiceClient(conn),
+		client: keymanager.NewKeyManagerServiceClient(conn),
 	}
 }
 
@@ -128,10 +129,42 @@ func (c *KeyManagerClient) RegisterKey(ctx context.Context, req *RegisterKeyRequ
 	defer cancel()
 	ctx = contextWithAuth(ctx, token)
 
-	// TODO: Call gRPC service
-	// resp, err := c.client.RegisterClientKey(ctx, &keymanager.RegisterClientKeyRequest{...})
+	// Parse expiration time if provided
+	var expiresAt *timestamppb.Timestamp
+	if req.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expires_at format: %w", err)
+		}
+		expiresAt = timestamppb.New(t)
+	}
 
-	return nil, fmt.Errorf("not implemented - protobuf stubs need to be generated")
+	// Call gRPC service
+	resp, err := c.client.RegisterClientKey(ctx, &keymanager.RegisterClientKeyRequest{
+		ClientId:     req.ClientID,
+		PublicKeyPem: req.PublicKeyPEM,
+		KeyType:      keymanager.KeyType(req.KeyType),
+		ExpiresAt:    expiresAt,
+		Metadata:     req.Metadata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to register key: %w", err)
+	}
+
+	if !resp.Success {
+		return nil, fmt.Errorf("key registration failed: %s", resp.ErrorMessage)
+	}
+
+	return &ClientKey{
+		KeyID:        resp.Key.KeyId,
+		ClientID:     resp.Key.ClientId,
+		KeyType:      KeyType(resp.Key.KeyType),
+		PublicKeyPEM: resp.Key.PublicKeyPem,
+		Status:       resp.Key.Status.String(),
+		CreatedAt:    resp.Key.CreatedAt.AsTime().Format(time.RFC3339),
+		ExpiresAt:    formatTimestamp(resp.Key.ExpiresAt),
+		Metadata:     resp.Key.Metadata,
+	}, nil
 }
 
 // GetKey retrieves a registered client key by ID.
@@ -166,10 +199,29 @@ func (c *KeyManagerClient) GetKey(ctx context.Context, req *GetKeyRequest) (*Cli
 	defer cancel()
 	ctx = contextWithAuth(ctx, token)
 
-	// TODO: Call gRPC service
-	// resp, err := c.client.GetClientKey(ctx, &keymanager.GetClientKeyRequest{...})
+	// Call gRPC service
+	resp, err := c.client.GetClientKey(ctx, &keymanager.GetClientKeyRequest{
+		ClientId: req.ClientID,
+		KeyId:    req.KeyID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get key: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented - protobuf stubs need to be generated")
+	if !resp.Found {
+		return nil, fmt.Errorf("key not found: %s", resp.ErrorMessage)
+	}
+
+	return &ClientKey{
+		KeyID:        resp.Key.KeyId,
+		ClientID:     resp.Key.ClientId,
+		KeyType:      KeyType(resp.Key.KeyType),
+		PublicKeyPEM: resp.Key.PublicKeyPem,
+		Status:       resp.Key.Status.String(),
+		CreatedAt:    resp.Key.CreatedAt.AsTime().Format(time.RFC3339),
+		ExpiresAt:    formatTimestamp(resp.Key.ExpiresAt),
+		Metadata:     resp.Key.Metadata,
+	}, nil
 }
 
 // EncryptData encrypts data using a generated DEK, wrapped with the client's public key.
@@ -288,8 +340,36 @@ func (c *KeyManagerClient) ListKeys(ctx context.Context, clientID string, includ
 	defer cancel()
 	ctx = contextWithAuth(ctx, token)
 
-	// TODO: Call gRPC service
-	// resp, err := c.client.ListClientKeys(ctx, &keymanager.ListClientKeysRequest{...})
+	// Call gRPC service
+	resp, err := c.client.ListClientKeys(ctx, &keymanager.ListClientKeysRequest{
+		ClientId:       clientID,
+		IncludeRevoked: includeRevoked,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list keys: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented - protobuf stubs need to be generated")
+	keys := make([]*ClientKey, len(resp.Keys))
+	for i, key := range resp.Keys {
+		keys[i] = &ClientKey{
+			KeyID:        key.KeyId,
+			ClientID:     key.ClientId,
+			KeyType:      KeyType(key.KeyType),
+			PublicKeyPEM: key.PublicKeyPem,
+			Status:       key.Status.String(),
+			CreatedAt:    key.CreatedAt.AsTime().Format(time.RFC3339),
+			ExpiresAt:    formatTimestamp(key.ExpiresAt),
+			Metadata:     key.Metadata,
+		}
+	}
+
+	return keys, nil
+}
+
+// formatTimestamp formats a protobuf timestamp to RFC3339 string, or returns empty if nil
+func formatTimestamp(ts *timestamppb.Timestamp) string {
+	if ts == nil {
+		return ""
+	}
+	return ts.AsTime().Format(time.RFC3339)
 }

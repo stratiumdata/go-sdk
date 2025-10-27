@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	platform "github.com/stratiumdata/go-sdk/gen/services/platform"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // PlatformClient provides methods for making authorization decisions.
@@ -15,9 +17,7 @@ type PlatformClient struct {
 	conn   *grpc.ClientConn
 	config *Config
 	auth   *authManager
-
-	// TODO: Add generated proto client when available
-	// client platform.PlatformServiceClient
+	client platform.PlatformServiceClient
 }
 
 // Decision represents an authorization decision.
@@ -78,7 +78,7 @@ func newPlatformClient(conn *grpc.ClientConn, config *Config, auth *authManager)
 		conn:   conn,
 		config: config,
 		auth:   auth,
-		// client: platform.NewPlatformServiceClient(conn),
+		client: platform.NewPlatformServiceClient(conn),
 	}
 }
 
@@ -147,10 +147,33 @@ func (c *PlatformClient) GetDecision(ctx context.Context, req *AuthorizationRequ
 	defer cancel()
 	ctx = contextWithAuth(ctx, token)
 
-	// TODO: Call gRPC service
-	// resp, err := c.client.GetDecision(ctx, &platform.GetDecisionRequest{...})
+	// Convert subject attributes to structpb.Value map
+	subjectAttrs, err := stringMapToStructMap(req.SubjectAttributes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert subject attributes: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented - protobuf stubs need to be generated")
+	// Call gRPC service
+	resp, err := c.client.GetDecision(ctx, &platform.GetDecisionRequest{
+		SubjectAttributes:  subjectAttrs,
+		ResourceAttributes: req.ResourceAttributes,
+		Action:             req.Action,
+		Context:            req.Context,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get decision: %w", err)
+	}
+
+	// Convert proto decision to SDK decision
+	decision := Decision(resp.Decision)
+
+	return &AuthorizationResponse{
+		Decision:        decision,
+		Reason:          resp.Reason,
+		EvaluatedPolicy: resp.EvaluatedPolicy,
+		Details:         resp.Details,
+		Timestamp:       resp.Timestamp.AsTime().Format("2006-01-02T15:04:05Z07:00"),
+	}, nil
 }
 
 // GetEntitlements retrieves all entitlements for a subject.
@@ -217,4 +240,13 @@ func (c *PlatformClient) CheckAccess(ctx context.Context, req *AuthorizationRequ
 		return false, err
 	}
 	return decision.Decision == DecisionAllow, nil
+}
+
+// stringMapToStructMap converts a map[string]string to map[string]*structpb.Value
+func stringMapToStructMap(m map[string]string) (map[string]*structpb.Value, error) {
+	result := make(map[string]*structpb.Value, len(m))
+	for k, v := range m {
+		result[k] = structpb.NewStringValue(v)
+	}
+	return result, nil
 }

@@ -66,22 +66,22 @@ generate-proto: copy-proto
 	@mkdir -p gen
 
 	@echo "Generating Platform service..."
-	protoc --go_out=gen --go_opt=paths=source_relative \
-		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+	protoc --go_out=gen --go_opt=module=stratium \
+		--go-grpc_out=gen --go-grpc_opt=module=stratium \
 		proto/services/platform/platform.proto
 
 	@echo "Generating Key Manager service..."
-	protoc --go_out=gen --go_opt=paths=source_relative \
-		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+	protoc --go_out=gen --go_opt=module=stratium \
+		--go-grpc_out=gen --go-grpc_opt=module=stratium \
 		proto/services/key-manager/key-manager.proto
 
 	@echo "Generating Key Access service..."
-	protoc --go_out=gen --go_opt=paths=source_relative \
-		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+	protoc --go_out=gen --go_opt=module=stratium \
+		--go-grpc_out=gen --go-grpc_opt=module=stratium \
 		proto/services/key-access/key-access.proto
 
 	@echo "Generating model protos..."
-	protoc --go_out=gen --go_opt=paths=source_relative \
+	protoc --go_out=gen --go_opt=module=stratium \
 		proto/models/*.proto
 
 	@echo "✓ gRPC stubs generated in gen/"
@@ -129,7 +129,7 @@ build-examples:
 	@echo "✓ Examples built in bin/"
 
 # Prepare SDK for publishing
-publish-prepare: fmt tidy
+publish-prepare: fmt tidy generate-proto
 	@echo "==========================================="
 	@echo "Preparing SDK for publishing..."
 	@echo "==========================================="
@@ -145,7 +145,7 @@ publish-prepare: fmt tidy
 	@rsync -av --progress \
 		--exclude='.git' \
 		--exclude='.gitignore' \
-		--exclude='gen/' \
+		--exclude='proto/' \
 		--exclude='bin/' \
 		--exclude='*.log' \
 		--exclude='.DS_Store' \

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	keyaccess "github.com/stratiumdata/go-sdk/gen/services/key-access"
+
 	"google.golang.org/grpc"
 )
 
@@ -16,8 +18,7 @@ type KeyAccessClient struct {
 	config *Config
 	auth   *authManager
 
-	// TODO: Add generated proto client when available
-	// client keyaccess.KeyAccessServiceClient
+	client keyaccess.KeyAccessServiceClient
 }
 
 // DEKRequest contains parameters for requesting a data encryption key.
@@ -45,7 +46,7 @@ func newKeyAccessClient(conn *grpc.ClientConn, config *Config, auth *authManager
 		conn:   conn,
 		config: config,
 		auth:   auth,
-		// client: keyaccess.NewKeyAccessServiceClient(conn),
+		client: keyaccess.NewKeyAccessServiceClient(conn),
 	}
 }
 
@@ -97,10 +98,32 @@ func (c *KeyAccessClient) RequestDEK(ctx context.Context, req *DEKRequest) (*DEK
 	defer cancel()
 	ctx = contextWithAuth(ctx, token)
 
-	// TODO: Call gRPC service
-	// resp, err := c.client.RequestDEK(ctx, &keyaccess.RequestDEKRequest{...})
+	// Call gRPC service to wrap DEK
+	resp, err := c.client.WrapDEK(ctx, &keyaccess.WrapDEKRequest{
+		Resource: req.ClientID, // Use client ID as resource identifier
+		Dek:      []byte{},     // Empty for new DEK generation
+		Action:   req.Purpose,
+		Context:  req.Context,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to wrap DEK: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented - protobuf stubs need to be generated")
+	if !resp.AccessGranted {
+		return nil, fmt.Errorf("access denied: %s", resp.AccessReason)
+	}
+
+	return &DEKResponse{
+		DEK:             []byte{}, // Server doesn't return plaintext DEK for security
+		WrappedDEK:      resp.WrappedDek,
+		KeyID:           resp.KeyId,
+		Algorithm:       "AES-256-GCM", // Default algorithm
+		ExpiresAt:       resp.Timestamp.AsTime().Format("2006-01-02T15:04:05Z07:00"),
+		PolicyEvaluated: resp.AccessReason,
+		Metadata: map[string]string{
+			"access_granted": fmt.Sprintf("%t", resp.AccessGranted),
+		},
+	}, nil
 }
 
 // UnwrapDEK unwraps a previously issued DEK using the client's private key.
@@ -133,8 +156,19 @@ func (c *KeyAccessClient) UnwrapDEK(ctx context.Context, clientID string, wrappe
 	defer cancel()
 	ctx = contextWithAuth(ctx, token)
 
-	// TODO: Call gRPC service if server-side unwrapping is supported
-	// resp, err := c.client.UnwrapDEK(ctx, &keyaccess.UnwrapDEKRequest{...})
+	// Call gRPC service to unwrap DEK
+	resp, err := c.client.UnwrapDEK(ctx, &keyaccess.UnwrapDEKRequest{
+		Resource:   clientID,
+		WrappedDek: wrappedDEK,
+		Action:     "decrypt",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to unwrap DEK: %w", err)
+	}
 
-	return nil, fmt.Errorf("not implemented - protobuf stubs need to be generated")
+	if !resp.AccessGranted {
+		return nil, fmt.Errorf("access denied: %s", resp.AccessReason)
+	}
+
+	return resp.DekForSubject, nil
 }
