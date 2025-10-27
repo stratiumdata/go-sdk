@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/stratiumdata/stratium-sdk-go"
+	"github.com/stratiumdata/go-sdk"
 )
 
 func main() {

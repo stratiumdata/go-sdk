@@ -1,4 +1,4 @@
-module github.com/stratiumdata/stratium-sdk-go
+module github.com/stratiumdata/go-sdk
 
 go 1.23
 

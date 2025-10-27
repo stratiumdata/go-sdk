@@ -14,7 +14,7 @@ The Stratium SDK provides easy-to-use clients for all Stratium services:
 ## Installation
 
 ```bash
-go get github.com/stratiumdata/stratium-sdk-go
+go get github.com/stratiumdata/go-sdk
 ```
 
 ## Quick Start
@@ -26,7 +26,7 @@ import (
     "context"
     "log"
 
-    "github.com/stratiumdata/stratium-sdk-go"
+    "github.com/stratiumdata/go-sdk"
 )
 
 func main() {
@@ -354,7 +354,7 @@ make generate-proto
 ## Support
 
 - Documentation: https://docs.stratium.example.com
-- Issues: https://github.com/stratiumdata/stratium-sdk-go/issues
+- Issues: https://github.com/stratiumdata/go-sdk/issues
 - Email: support@stratium.example.com
 
 ## License
