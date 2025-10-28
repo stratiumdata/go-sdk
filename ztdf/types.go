@@ -30,8 +30,8 @@ type WrapOptions struct {
 
 // UnwrapOptions contains options for unwrapping a ZTDF
 type UnwrapOptions struct {
-	// OIDC Client ID
-	ClientID string
+	// Resource identifier
+	Resource string
 
 	// Key ID for the Client
 	ClientKeyID string

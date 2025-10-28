@@ -319,11 +319,11 @@ func (c *Client) wrapDEK(ctx context.Context, resource string, dek []byte, resou
 
 // unwrapDEK unwraps a DEK using the Key Access Server
 func (c *Client) unwrapDEK(ctx context.Context, cfg *UnwrapOptions, kid string, wrappedDEK []byte, policy string) ([]byte, error) {
-	if c.stratiumClient.Config().OIDC != nil {
-		cfg.ClientID = c.stratiumClient.Config().OIDC.ClientID
+	if cfg.Resource == "" {
+		return nil, fmt.Errorf("%s: %s", ErrMsgFailedToUnwrapDEK, "resource identifier cannot be empty")
 	}
 
-	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, cfg.ClientID, cfg.ClientKeyID, kid, wrappedDEK, policy)
+	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, cfg.Resource, cfg.ClientKeyID, kid, wrappedDEK, policy)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ErrMsgFailedToUnwrapDEK, err)
 	}
