@@ -62,6 +62,8 @@ type OIDCConfig struct {
 	IssuerURL    string   // OIDC issuer URL (e.g., "https://keycloak.example.com/realms/stratium")
 	ClientID     string   // OIDC client ID
 	ClientSecret string   // OIDC client secret
+	Username     string   // Username to use with password grant
+	Password     string   // Password to use with password grant
 	Scopes       []string // OIDC scopes (default: ["openid", "profile", "email"])
 	RedirectURL  string   // OIDC redirect url (e.g., https://localhost:8080/callback)
 }

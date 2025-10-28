@@ -63,25 +63,17 @@ func newAuthManager(config *OIDCConfig) (*authManager, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := am.authenticate(ctx); err != nil {
-		return nil, fmt.Errorf("initial authentication failed: %w", err)
+	if config.Username != "" && config.Password != "" {
+		if err := am.authenticatePasswordGrant(ctx, config.Username, config.Password); err != nil {
+			return nil, fmt.Errorf("initial authentication failed: %w", err)
+		}
+	} else {
+		if err := am.authenticate(ctx); err != nil {
+			return nil, fmt.Errorf("initial authentication failed: %w", err)
+		}
 	}
 
 	return am, nil
-}
-
-// AuthenticatePasswordGrant uses Resource Owner Password Credentials grant
-func (am *authManager) AuthenticatePasswordGrant(ctx context.Context, username, password string) error {
-	token, err := am.oauth2Config.PasswordCredentialsToken(ctx, username, password)
-	if err != nil {
-		return fmt.Errorf("password authentication failed: %w", err)
-	}
-
-	am.accessToken = token.AccessToken
-	am.refreshToken = token.RefreshToken
-	am.expiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
-
-	return nil
 }
 
 // GetToken returns a valid access token, refreshing if necessary.
@@ -167,13 +159,18 @@ func (am *authManager) authenticate(ctx context.Context) error {
 	return nil
 }
 
-// AuthenticatePasswordGrant uses Resource Owner Password Credentials grant
-func (am *authManager) authenticatePasswordGrant(ctx context.Context, username, password string) (*oauth2.Token, error) {
+// authenticatePasswordGrant uses Resource Owner Password Credentials grant
+func (am *authManager) authenticatePasswordGrant(ctx context.Context, username, password string) error {
 	token, err := am.oauth2Config.PasswordCredentialsToken(ctx, username, password)
 	if err != nil {
-		return nil, fmt.Errorf("password authentication failed: %w", err)
+		return fmt.Errorf("password authentication failed: %w", err)
 	}
-	return token, nil
+
+	am.accessToken = token.AccessToken
+	am.refreshToken = token.RefreshToken
+	am.expiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+
+	return nil
 }
 
 // refreshWithRefreshToken uses the refresh token to get a new access token.
