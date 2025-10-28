@@ -6,10 +6,10 @@ import (
 
 // WrapOptions contains options for wrapping data into a ZTDF
 type WrapOptions struct {
-	// OIDC Client ID
-	ClientID string
+	// Resource identifier
+	Resource string
 
-	// Resource identifier for ABAC policy evaluation
+	// Resource attributes for ABAC policy evaluation
 	ResourceAttributes map[string]string
 
 	// Data attributes for policy (optional, defaults will be provided)
