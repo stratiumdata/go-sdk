@@ -128,7 +128,7 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 	policyBindingHash := CalculatePolicyBinding(dek, policyBase64)
 
 	// Step 5: Wrap DEK using Key Access Server
-	wrappedDEK, keyID, err := c.wrapDEK(ctx, opts.ClientID, dek, opts.ResourceAttributes, policyBase64, opts.Context)
+	wrappedDEK, keyID, err := c.wrapDEK(ctx, opts.Resource, dek, opts.ResourceAttributes, policyBase64, opts.Context)
 	if err != nil {
 		return nil, err
 	}
@@ -297,13 +297,13 @@ func (c *Client) UnwrapFile(ctx context.Context, inputPath, outputPath string, o
 }
 
 // wrapDEK wraps a DEK using the Key Access Server
-func (c *Client) wrapDEK(ctx context.Context, clientID string, dek []byte, resourceAttributes map[string]string, policy string, contextMap map[string]string) ([]byte, string, error) {
-	if c.stratiumClient.Config().OIDC != nil {
-		clientID = c.stratiumClient.Config().OIDC.ClientID
+func (c *Client) wrapDEK(ctx context.Context, resource string, dek []byte, resourceAttributes map[string]string, policy string, contextMap map[string]string) ([]byte, string, error) {
+	if resource == "" {
+		return nil, "", fmt.Errorf("%s: %s", ErrMsgFailedToWrapDEK, "resource identifier cannot be empty")
 	}
 
 	resp, err := c.stratiumClient.KeyAccess.RequestDEK(ctx, &stratium.DEKRequest{
-		ClientID:           clientID,
+		Resource:           resource,
 		ResourceAttributes: resourceAttributes,
 		Purpose:            "encryption",
 		Context:            contextMap,
