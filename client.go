@@ -187,3 +187,9 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 	}
 	return c.auth.RefreshToken(ctx)
 }
+
+// Config returns the client's configuration.
+// This is useful for accessing service addresses and other configuration details.
+func (c *Client) Config() *Config {
+	return c.config
+}

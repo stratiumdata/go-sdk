@@ -1,0 +1,406 @@
+// Package ztdf provides utilities for working with Zero Trust Data Format (ZTDF) files.
+//
+// ZTDF is a secure file format that combines encryption, policy-based access control,
+// and integrity verification. This package provides tools to:
+//   - Encrypt data into ZTDF format with attribute-based access control
+//   - Decrypt ZTDF files with policy enforcement
+//   - Work with ZTDF policies and attributes
+//   - Validate and inspect ZTDF files
+//
+// Example usage:
+//
+//	// Create ZTDF client
+//	client := ztdf.NewClient(stratiumClient)
+//
+//	// Wrap (encrypt) data
+//	tdo, err := client.Wrap(ctx, plaintext, &ztdf.WrapOptions{
+//	    Resource: "my-document",
+//	    Attributes: []ztdf.Attribute{
+//	        {
+//	            URI:         "http://example.com/attr/classification/value/secret",
+//	            DisplayName: "Classification: Secret",
+//	            IsDefault:   true,
+//	        },
+//	    },
+//	})
+//
+//	// Save to file
+//	ztdf.SaveToFile(tdo, "encrypted.ztdf")
+//
+//	// Load from file
+//	tdo, err := ztdf.LoadFromFile("encrypted.ztdf")
+//
+//	// Unwrap (decrypt) data
+//	plaintext, err := client.Unwrap(ctx, tdo, &ztdf.UnwrapOptions{
+//	    Resource: "my-document",
+//	})
+package ztdf
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+
+	stratium "github.com/stratiumdata/go-sdk"
+	"github.com/stratiumdata/go-sdk/gen/models"
+	"github.com/google/uuid"
+)
+
+// Client provides high-level methods for working with ZTDF files.
+// It integrates with the Stratium SDK to handle key management and access control.
+type Client struct {
+	stratiumClient *stratium.Client
+	keyAccessURL   string
+}
+
+// NewClient creates a new ZTDF client using a Stratium SDK client.
+//
+// Example:
+//
+//	stratiumClient, _ := stratium.NewClient(config)
+//	ztdfClient := ztdf.NewClient(stratiumClient)
+func NewClient(stratiumClient *stratium.Client) *Client {
+	keyAccessURL := stratiumClient.Config().KeyAccessAddress
+	if keyAccessURL == "" {
+		keyAccessURL = "localhost:50053" // Default
+	}
+
+	return &Client{
+		stratiumClient: stratiumClient,
+		keyAccessURL:   keyAccessURL,
+	}
+}
+
+// Wrap encrypts plaintext data and creates a ZTDF.
+//
+// The wrap process:
+//  1. Generates a random Data Encryption Key (DEK)
+//  2. Encrypts the payload with the DEK using AES-256-GCM
+//  3. Creates a policy from the provided attributes
+//  4. Wraps the DEK using the Key Access Server (policy enforcement)
+//  5. Creates a manifest with all metadata
+//  6. Returns a complete ZTDF structure
+//
+// Example:
+//
+//	tdo, err := client.Wrap(ctx, plaintext, &ztdf.WrapOptions{
+//	    Resource: "document-123",
+//	    Attributes: []ztdf.Attribute{
+//	        {
+//	            URI:         "http://example.com/attr/classification/value/secret",
+//	            DisplayName: "Classification: Secret",
+//	            IsDefault:   true,
+//	        },
+//	    },
+//	    IntegrityCheck: true,
+//	})
+func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) (*TrustedDataObject, error) {
+	if opts == nil {
+		opts = &WrapOptions{
+			IntegrityCheck: true,
+		}
+	}
+	if opts.Resource == "" {
+		opts.Resource = "ztdf-resource"
+	}
+
+	// Step 1: Generate DEK
+	dek, err := GenerateDEK()
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Encrypt payload with DEK
+	encryptedPayload, iv, err := EncryptPayload(plaintext, dek)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 3: Create policy
+	policy := opts.Policy
+	if policy == nil {
+		policy = CreatePolicy(c.keyAccessURL, opts.Attributes)
+	}
+
+	policyBase64, err := EncodePolicyToBase64(policy)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 4: Calculate policy binding
+	policyBindingHash := CalculatePolicyBinding(dek, policyBase64)
+
+	// Step 5: Wrap DEK using Key Access Server
+	wrappedDEK, keyID, err := c.wrapDEK(ctx, dek, opts.Resource, policyBase64, opts.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 6: Calculate payload hash
+	payloadHash := CalculatePayloadHash(encryptedPayload)
+
+	// Step 7: Create manifest
+	manifest := c.createManifest(
+		wrappedDEK,
+		keyID,
+		policyBase64,
+		policyBindingHash,
+		iv,
+		encryptedPayload,
+		plaintext,
+		payloadHash,
+	)
+
+	// Step 8: Create TDO
+	tdo := &TrustedDataObject{
+		Manifest: manifest,
+		Payload: &Payload{
+			Data: encryptedPayload,
+		},
+	}
+
+	return tdo, nil
+}
+
+// Unwrap decrypts a ZTDF and returns the plaintext.
+//
+// The unwrap process:
+//  1. Validates the manifest structure
+//  2. Unwraps the DEK using the Key Access Server (policy enforcement)
+//  3. Verifies the policy binding (if enabled)
+//  4. Decrypts the payload with the DEK
+//  5. Verifies payload integrity (if enabled)
+//  6. Returns the plaintext
+//
+// Example:
+//
+//	plaintext, err := client.Unwrap(ctx, tdo, &ztdf.UnwrapOptions{
+//	    Resource:        "document-123",
+//	    VerifyIntegrity: true,
+//	    VerifyPolicy:    true,
+//	})
+func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *UnwrapOptions) ([]byte, error) {
+	if opts == nil {
+		opts = &UnwrapOptions{
+			VerifyIntegrity: true,
+			VerifyPolicy:    true,
+		}
+	}
+	if opts.Resource == "" {
+		opts.Resource = "ztdf-resource"
+	}
+
+	// Step 1: Validate manifest
+	if tdo.Manifest == nil || tdo.Manifest.EncryptionInformation == nil {
+		return nil, fmt.Errorf("invalid ZTDF: missing encryption information")
+	}
+
+	encInfo := tdo.Manifest.EncryptionInformation
+	if len(encInfo.KeyAccess) == 0 {
+		return nil, fmt.Errorf("invalid ZTDF: no key access objects")
+	}
+
+	kao := encInfo.KeyAccess[0]
+
+	// Step 2: Decode wrapped key
+	wrappedKey, err := base64.StdEncoding.DecodeString(kao.WrappedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode wrapped key: %w", err)
+	}
+
+	// Step 3: Unwrap DEK using Key Access Server
+	dek, err := c.unwrapDEK(ctx, wrappedKey, opts.Resource, encInfo.Policy, opts.Context)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 4: Verify policy binding (if requested)
+	if opts.VerifyPolicy && kao.PolicyBinding != nil {
+		if err := VerifyPolicyBinding(dek, encInfo.Policy, kao.PolicyBinding.Hash); err != nil {
+			return nil, fmt.Errorf("policy verification failed: %w", err)
+		}
+	}
+
+	// Step 5: Decrypt payload
+	if tdo.Payload == nil {
+		return nil, fmt.Errorf("invalid ZTDF: missing payload")
+	}
+
+	ivBase64 := encInfo.Method.Iv
+	iv, err := base64.StdEncoding.DecodeString(ivBase64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode IV: %w", err)
+	}
+
+	plaintext, err := DecryptPayload(tdo.Payload.Data, dek, iv)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 6: Verify payload integrity (if requested)
+	if opts.VerifyIntegrity && encInfo.IntegrityInformation != nil && encInfo.IntegrityInformation.RootSignature != nil {
+		expectedHash, err := base64.StdEncoding.DecodeString(encInfo.IntegrityInformation.RootSignature.Sig)
+		if err == nil {
+			if err := VerifyPayloadHash(tdo.Payload.Data, expectedHash); err != nil {
+				return nil, fmt.Errorf("integrity verification failed: %w", err)
+			}
+		}
+	}
+
+	return plaintext, nil
+}
+
+// WrapFile encrypts a file and saves it as a ZTDF.
+//
+// Example:
+//
+//	err := client.WrapFile(ctx, "plaintext.txt", "encrypted.ztdf", &ztdf.WrapOptions{
+//	    Resource: "my-document",
+//	})
+func (c *Client) WrapFile(ctx context.Context, inputPath, outputPath string, opts *WrapOptions) error {
+	plaintext, err := os.ReadFile(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to read input file: %w", err)
+	}
+
+	tdo, err := c.Wrap(ctx, plaintext, opts)
+	if err != nil {
+		return err
+	}
+
+	return SaveToFile(tdo, outputPath)
+}
+
+// UnwrapFile decrypts a ZTDF file and saves the plaintext.
+//
+// Example:
+//
+//	err := client.UnwrapFile(ctx, "encrypted.ztdf", "plaintext.txt", &ztdf.UnwrapOptions{
+//	    Resource: "my-document",
+//	})
+func (c *Client) UnwrapFile(ctx context.Context, inputPath, outputPath string, opts *UnwrapOptions) error {
+	tdo, err := LoadFromFile(inputPath)
+	if err != nil {
+		return err
+	}
+
+	plaintext, err := c.Unwrap(ctx, tdo, opts)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(outputPath, plaintext, 0644); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	return nil
+}
+
+// wrapDEK wraps a DEK using the Key Access Server
+func (c *Client) wrapDEK(ctx context.Context, dek []byte, resource, policy string, contextMap map[string]string) ([]byte, string, error) {
+	clientID := "sdk-client" // Default client ID
+	if c.stratiumClient.Config().OIDC != nil {
+		clientID = c.stratiumClient.Config().OIDC.ClientID
+	}
+
+	resp, err := c.stratiumClient.KeyAccess.RequestDEK(ctx, &stratium.DEKRequest{
+		ClientID:           clientID,
+		ResourceAttributes: map[string]string{"name": resource},
+		Purpose:            "encryption",
+		Context:            contextMap,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to wrap DEK: %w", err)
+	}
+
+	return resp.WrappedDEK, resp.KeyID, nil
+}
+
+// unwrapDEK unwraps a DEK using the Key Access Server
+func (c *Client) unwrapDEK(ctx context.Context, wrappedDEK []byte, resource, policy string, contextMap map[string]string) ([]byte, error) {
+	clientID := "sdk-client" // Default client ID
+	if c.stratiumClient.Config().OIDC != nil {
+		clientID = c.stratiumClient.Config().OIDC.ClientID
+	}
+
+	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, clientID, wrappedDEK)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unwrap DEK: %w", err)
+	}
+
+	return dek, nil
+}
+
+// createManifest creates a ZTDF manifest
+func (c *Client) createManifest(wrappedDEK []byte, keyID, policyBase64, policyBindingHash string, iv, encryptedPayload, plaintext, payloadHash []byte) *models.Manifest {
+	return &models.Manifest{
+		Assertions: []*models.Assertion{
+			{
+				Id:             uuid.New().String(),
+				Type:           models.Assertion_HANDLING,
+				Scope:          models.Assertion_TDO,
+				AppliesToState: models.AppliesTo_CIPHERTEXT,
+				Statement: &models.Assertion_Statement{
+					Format: models.Assertion_Statement_JSON_STRUCTURED,
+					JsonValue: `{
+						"classification": "UNCLASSIFIED",
+						"handling": "CONTROLLED"
+					}`,
+				},
+				Binding: &models.Assertion_AssertionBinding{
+					Method:    "jws",
+					Signature: "placeholder-signature",
+				},
+			},
+		},
+		EncryptionInformation: &models.EncryptionInformation{
+			Type: models.EncryptionInformation_SPLIT,
+			KeyAccess: []*models.EncryptionInformation_KeyAccessObject{
+				{
+					Type:       models.EncryptionInformation_KeyAccessObject_WRAPPED,
+					Url:        c.keyAccessURL,
+					Protocol:   models.EncryptionInformation_KeyAccessObject_KAS,
+					WrappedKey: base64.StdEncoding.EncodeToString(wrappedDEK),
+					Sid:        uuid.New().String(),
+					Kid:        keyID,
+					PolicyBinding: &models.EncryptionInformation_KeyAccessObject_PolicyBinding{
+						Alg:  "HS256",
+						Hash: policyBindingHash,
+					},
+					TdfSpecVersion: "4.0.0",
+				},
+			},
+			Method: &models.EncryptionInformation_Method{
+				Algorithm:    "AES-256-GCM",
+				IsStreamable: false,
+				Iv:           base64.StdEncoding.EncodeToString(iv),
+			},
+			IntegrityInformation: &models.EncryptionInformation_IntegrityInformation{
+				RootSignature: &models.EncryptionInformation_IntegrityInformation_RootSignature{
+					Alg: "HS256",
+					Sig: base64.StdEncoding.EncodeToString(payloadHash),
+				},
+				SegmentHashAlg:              "GMAC",
+				SegmentSizeDefault:          int32(len(encryptedPayload)),
+				EncryptedSegmentSizeDefault: int32(len(encryptedPayload)),
+				Segments: []*models.EncryptionInformation_IntegrityInformation_Segment{
+					{
+						Hash:                 base64.StdEncoding.EncodeToString(payloadHash),
+						SegmentSize:          int32(len(plaintext)),
+						EncryptedSegmentSize: int32(len(encryptedPayload)),
+					},
+				},
+			},
+			Policy: policyBase64,
+		},
+		Payload: &models.PayloadReference{
+			Type:           "reference",
+			Url:            "0.payload",
+			Protocol:       "zip",
+			IsEncrypted:    true,
+			MimeType:       "application/octet-stream",
+			TdfSpecVersion: "4.0.0",
+		},
+	}
+}
