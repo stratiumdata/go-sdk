@@ -63,6 +63,7 @@ type OIDCConfig struct {
 	ClientID     string   // OIDC client ID
 	ClientSecret string   // OIDC client secret
 	Scopes       []string // OIDC scopes (default: ["openid", "profile", "email"])
+	RedirectURL  string   // OIDC redirect url (e.g., https://localhost:8080/callback)
 }
 
 // Validate checks if the configuration is valid.

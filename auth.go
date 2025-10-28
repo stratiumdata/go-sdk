@@ -10,11 +10,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 )
 
 // authManager handles OIDC authentication and token management.
 type authManager struct {
-	config *OIDCConfig
+	config       *OIDCConfig
+	oauth2Config *oauth2.Config
 
 	mu           sync.RWMutex
 	accessToken  string
@@ -34,8 +38,22 @@ type tokenResponse struct {
 
 // newAuthManager creates a new authentication manager.
 func newAuthManager(config *OIDCConfig) (*authManager, error) {
+	ctx := context.Background()
+
+	provider, err := oidc.NewProvider(ctx, config.IssuerURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OIDC provider: %w", err)
+	}
+
 	am := &authManager{
 		config: config,
+		oauth2Config: &oauth2.Config{
+			ClientID:     config.ClientID,
+			ClientSecret: config.ClientSecret,
+			RedirectURL:  config.RedirectURL,
+			Endpoint:     provider.Endpoint(),
+			Scopes:       config.Scopes,
+		},
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -50,6 +68,20 @@ func newAuthManager(config *OIDCConfig) (*authManager, error) {
 	}
 
 	return am, nil
+}
+
+// AuthenticatePasswordGrant uses Resource Owner Password Credentials grant
+func (am *authManager) AuthenticatePasswordGrant(ctx context.Context, username, password string) error {
+	token, err := am.oauth2Config.PasswordCredentialsToken(ctx, username, password)
+	if err != nil {
+		return fmt.Errorf("password authentication failed: %w", err)
+	}
+
+	am.accessToken = token.AccessToken
+	am.refreshToken = token.RefreshToken
+	am.expiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+
+	return nil
 }
 
 // GetToken returns a valid access token, refreshing if necessary.
@@ -133,6 +165,15 @@ func (am *authManager) authenticate(ctx context.Context) error {
 	am.expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 
 	return nil
+}
+
+// AuthenticatePasswordGrant uses Resource Owner Password Credentials grant
+func (am *authManager) authenticatePasswordGrant(ctx context.Context, username, password string) (*oauth2.Token, error) {
+	token, err := am.oauth2Config.PasswordCredentialsToken(ctx, username, password)
+	if err != nil {
+		return nil, fmt.Errorf("password authentication failed: %w", err)
+	}
+	return token, nil
 }
 
 // refreshWithRefreshToken uses the refresh token to get a new access token.
