@@ -7,9 +7,50 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
+	"os"
+	"path/filepath"
 )
+
+// GenerateRSAKeyPair generates an RSA key pair for the client
+func GenerateRSAKeyPair(bits int) (*rsa.PrivateKey, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate key pair: %w", err)
+	}
+	return privateKey, nil
+}
+
+// SaveRSAPrivateKey saves RSA private key to file
+func SaveRSAPrivateKey(privateKey *rsa.PrivateKey, dir string, filename string) error {
+	privateKeyPath := filepath.Join(dir, filename)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create keys directory: %w", err)
+	}
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+	return os.WriteFile(privateKeyPath, privateKeyPEM, 0600)
+}
+
+// RSAPublicKeyToPEM converts public key to PEM format
+func RSAPublicKeyToPEM(publicKey *rsa.PublicKey) (string, error) {
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal public key: %w", err)
+	}
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	})
+	return string(publicKeyPEM), nil
+}
 
 // GenerateDEK generates a random 256-bit AES key for data encryption.
 //
