@@ -93,6 +93,7 @@ func NewEncryptionError(operation, message string, err error) *EncryptionError {
 // Common validation errors
 var (
 	ErrClientIDRequired           = NewValidationError("client_id", "is required")
+	ErrResourceRequired           = NewValidationError("resource", "is required")
 	ErrResourceAttributesRequired = NewValidationError("resource_attributes", "are required")
 	ErrActionRequired             = NewValidationError("action", "is required")
 	ErrSubjectAttributesRequired  = NewValidationError("subject_attributes", "are required")

@@ -97,11 +97,6 @@ func NewClient(stratiumClient *stratium.Client) *Client {
 //	    IntegrityCheck: true,
 //	})
 func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) (*TrustedDataObject, error) {
-	if opts == nil {
-		opts = &WrapOptions{
-			IntegrityCheck: true,
-		}
-	}
 	if len(opts.ResourceAttributes) == 0 {
 		opts.ResourceAttributes = map[string]string{"name": DefaultResourceName}
 	}

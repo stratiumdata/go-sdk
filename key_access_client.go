@@ -23,7 +23,7 @@ type KeyAccessClient struct {
 
 // DEKRequest contains parameters for requesting a data encryption key.
 type DEKRequest struct {
-	ClientID           string            // Client requesting the key
+	Resource           string            // Resource identifier being wrapped
 	ResourceAttributes map[string]string // Attributes of the resource to encrypt
 	Purpose            string            // Purpose of the key (e.g., "encryption", "backup")
 	Context            map[string]string // Additional context
@@ -86,8 +86,8 @@ func (c *KeyAccessClient) RequestDEK(ctx context.Context, req *DEKRequest) (*DEK
 	if req == nil {
 		return nil, ErrRequestNil
 	}
-	if req.ClientID == "" {
-		return nil, ErrClientIDRequired
+	if req.Resource == "" {
+		return nil, ErrResourceRequired
 	}
 	if len(req.ResourceAttributes) == 0 {
 		return nil, ErrResourceAttributesRequired
@@ -102,7 +102,7 @@ func (c *KeyAccessClient) RequestDEK(ctx context.Context, req *DEKRequest) (*DEK
 
 	// Call gRPC service to wrap DEK
 	resp, err := c.client.WrapDEK(ctx, &keyaccess.WrapDEKRequest{
-		Resource: req.ClientID, // Use client ID as resource identifier
+		Resource: req.Resource, // Use client ID as resource identifier
 		Dek:      req.DEK,
 		Action:   req.Purpose,
 		Context:  req.Context,
