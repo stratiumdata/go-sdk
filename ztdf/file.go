@@ -31,7 +31,7 @@ func SaveToFile(tdo *TrustedDataObject, outputPath string) error {
 		return fmt.Errorf("failed to marshal manifest: %w", err)
 	}
 
-	manifestWriter, err := zipWriter.Create("manifest.json")
+	manifestWriter, err := zipWriter.Create(ManifestFileName)
 	if err != nil {
 		zipWriter.Close()
 		return fmt.Errorf("failed to create manifest entry: %w", err)
@@ -42,7 +42,7 @@ func SaveToFile(tdo *TrustedDataObject, outputPath string) error {
 	}
 
 	// Write payload
-	payloadWriter, err := zipWriter.Create("0.payload")
+	payloadWriter, err := zipWriter.Create(PayloadFileName)
 	if err != nil {
 		zipWriter.Close()
 		return fmt.Errorf("failed to create payload entry: %w", err)
@@ -57,7 +57,7 @@ func SaveToFile(tdo *TrustedDataObject, outputPath string) error {
 	}
 
 	// Write to file
-	if err := os.WriteFile(outputPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(outputPath, buf.Bytes(), DefaultFileMode); err != nil {
 		return fmt.Errorf("failed to write zip file: %w", err)
 	}
 
@@ -98,7 +98,7 @@ func LoadFromBytes(zipData []byte) (*TrustedDataObject, error) {
 	tdo := &TrustedDataObject{}
 
 	for _, file := range reader.File {
-		if file.Name == "manifest.json" {
+		if file.Name == ManifestFileName {
 			rc, err := file.Open()
 			if err != nil {
 				return nil, fmt.Errorf("failed to open manifest: %w", err)
@@ -114,7 +114,7 @@ func LoadFromBytes(zipData []byte) (*TrustedDataObject, error) {
 				return nil, fmt.Errorf("failed to unmarshal manifest: %w", err)
 			}
 			tdo.Manifest = manifest
-		} else if file.Name == "0.payload" {
+		} else if file.Name == PayloadFileName {
 			rc, err := file.Open()
 			if err != nil {
 				return nil, fmt.Errorf("failed to open payload: %w", err)
@@ -156,7 +156,7 @@ func SaveToBytes(tdo *TrustedDataObject) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal manifest: %w", err)
 	}
 
-	manifestWriter, err := zipWriter.Create("manifest.json")
+	manifestWriter, err := zipWriter.Create(ManifestFileName)
 	if err != nil {
 		zipWriter.Close()
 		return nil, fmt.Errorf("failed to create manifest entry: %w", err)
@@ -167,7 +167,7 @@ func SaveToBytes(tdo *TrustedDataObject) ([]byte, error) {
 	}
 
 	// Write payload
-	payloadWriter, err := zipWriter.Create("0.payload")
+	payloadWriter, err := zipWriter.Create(PayloadFileName)
 	if err != nil {
 		zipWriter.Close()
 		return nil, fmt.Errorf("failed to create payload entry: %w", err)

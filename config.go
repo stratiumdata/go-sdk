@@ -89,13 +89,13 @@ func (c *Config) Validate() error {
 // SetDefaults sets default values for unspecified configuration options.
 func (c *Config) SetDefaults() {
 	if c.Timeout == 0 {
-		c.Timeout = 30 * time.Second
+		c.Timeout = DefaultTimeout
 	}
 	if c.RetryAttempts == 0 {
-		c.RetryAttempts = 3
+		c.RetryAttempts = DefaultRetryAttempts
 	}
 	if c.OIDC != nil && len(c.OIDC.Scopes) == 0 {
-		c.OIDC.Scopes = []string{"openid", "profile", "email"}
+		c.OIDC.Scopes = DefaultOIDCScopes
 	}
 }
 
@@ -130,5 +130,5 @@ func contextWithAuth(ctx context.Context, token string) context.Context {
 	if token == "" {
 		return ctx
 	}
-	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+	return metadata.AppendToOutgoingContext(ctx, "authorization", AuthHeaderPrefix+token)
 }

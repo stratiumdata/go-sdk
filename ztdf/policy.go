@@ -21,17 +21,6 @@ import (
 //	    },
 //	})
 func CreatePolicy(keyAccessURL string, attributes []Attribute) *models.ZtdfPolicy {
-	if len(attributes) == 0 {
-		// Provide default attributes
-		attributes = []Attribute{
-			{
-				URI:         "http://example.com/attr/classification/value/confidential",
-				DisplayName: "Classification",
-				IsDefault:   true,
-			},
-		}
-	}
-
 	dataAttrs := make([]*models.ZtdfPolicy_Body_Attribute, len(attributes))
 	for i, attr := range attributes {
 		dataAttrs[i] = &models.ZtdfPolicy_Body_Attribute{
@@ -47,7 +36,7 @@ func CreatePolicy(keyAccessURL string, attributes []Attribute) *models.ZtdfPolic
 		Body: &models.ZtdfPolicy_Body{
 			DataAttributes: dataAttrs,
 		},
-		TdfSpecVersion: "4.0.0",
+		TdfSpecVersion: TDFSpecVersion,
 	}
 }
 
@@ -58,7 +47,7 @@ func CreatePolicy(keyAccessURL string, attributes []Attribute) *models.ZtdfPolic
 //	policy := ztdf.CreateClassificationPolicy("kas.example.com:50053", "secret")
 func CreateClassificationPolicy(keyAccessURL, classification string) *models.ZtdfPolicy {
 	displayName := fmt.Sprintf("Classification: %s", classification)
-	uri := fmt.Sprintf("http://example.com/attr/classification/value/%s", classification)
+	uri := fmt.Sprintf(ClassificationURITemplate, classification)
 
 	return CreatePolicy(keyAccessURL, []Attribute{
 		{
@@ -84,7 +73,7 @@ func CreateMultiAttributePolicy(keyAccessURL string, attributeValues map[string]
 
 	for attrType, value := range attributeValues {
 		attributes = append(attributes, Attribute{
-			URI:         fmt.Sprintf("http://example.com/attr/%s/value/%s", attrType, value),
+			URI:         fmt.Sprintf(AttributeURITemplate, attrType, value),
 			DisplayName: fmt.Sprintf("%s: %s", attrType, value),
 			IsDefault:   isFirst,
 		})

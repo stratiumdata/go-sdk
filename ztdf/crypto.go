@@ -20,7 +20,7 @@ import (
 //	    log.Fatal(err)
 //	}
 func GenerateDEK() ([]byte, error) {
-	dek := make([]byte, 32) // AES-256
+	dek := make([]byte, AESKeySize) // AES-256 (32 bytes)
 	if _, err := rand.Read(dek); err != nil {
 		return nil, fmt.Errorf("failed to generate DEK: %w", err)
 	}

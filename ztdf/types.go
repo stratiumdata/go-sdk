@@ -6,6 +6,9 @@ import (
 
 // WrapOptions contains options for wrapping data into a ZTDF
 type WrapOptions struct {
+	// OIDC Client ID
+	ClientID string
+
 	// Resource identifier for ABAC policy evaluation
 	Resource string
 
@@ -20,10 +23,16 @@ type WrapOptions struct {
 
 	// Additional context for key access
 	Context map[string]string
+
+	// Manifest template for ZTDF
+	Manifest *models.Manifest
 }
 
 // UnwrapOptions contains options for unwrapping a ZTDF
 type UnwrapOptions struct {
+	// OIDC Client ID
+	ClientID string
+
 	// Resource identifier for ABAC policy evaluation
 	Resource string
 
@@ -62,12 +71,12 @@ type Payload struct {
 
 // PolicyInfo contains parsed policy information
 type PolicyInfo struct {
-	UUID              string
-	DataAttributes    []PolicyAttribute
-	TDFSpecVersion    string
-	EncryptionMethod  string
-	IntegrityMethod   string
-	KeyAccessURL      string
+	UUID             string
+	DataAttributes   []PolicyAttribute
+	TDFSpecVersion   string
+	EncryptionMethod string
+	IntegrityMethod  string
+	KeyAccessURL     string
 }
 
 // PolicyAttribute represents a policy attribute

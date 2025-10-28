@@ -42,9 +42,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	stratium "github.com/stratiumdata/go-sdk"
 	"github.com/stratiumdata/go-sdk/gen/models"
-	"github.com/google/uuid"
 )
 
 // Client provides high-level methods for working with ZTDF files.
@@ -63,7 +63,7 @@ type Client struct {
 func NewClient(stratiumClient *stratium.Client) *Client {
 	keyAccessURL := stratiumClient.Config().KeyAccessAddress
 	if keyAccessURL == "" {
-		keyAccessURL = "localhost:50053" // Default
+		keyAccessURL = DefaultKeyAccessURL
 	}
 
 	return &Client{
@@ -102,7 +102,7 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 		}
 	}
 	if opts.Resource == "" {
-		opts.Resource = "ztdf-resource"
+		opts.Resource = DefaultResourceName
 	}
 
 	// Step 1: Generate DEK
@@ -132,7 +132,7 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 	policyBindingHash := CalculatePolicyBinding(dek, policyBase64)
 
 	// Step 5: Wrap DEK using Key Access Server
-	wrappedDEK, keyID, err := c.wrapDEK(ctx, dek, opts.Resource, policyBase64, opts.Context)
+	wrappedDEK, keyID, err := c.wrapDEK(ctx, opts.ClientID, dek, opts.Resource, policyBase64, opts.Context)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +142,7 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 
 	// Step 7: Create manifest
 	manifest := c.createManifest(
+		opts.Manifest,
 		wrappedDEK,
 		keyID,
 		policyBase64,
@@ -188,17 +189,17 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 		}
 	}
 	if opts.Resource == "" {
-		opts.Resource = "ztdf-resource"
+		opts.Resource = DefaultResourceName
 	}
 
 	// Step 1: Validate manifest
 	if tdo.Manifest == nil || tdo.Manifest.EncryptionInformation == nil {
-		return nil, fmt.Errorf("invalid ZTDF: missing encryption information")
+		return nil, fmt.Errorf("%s: %s", ErrMsgInvalidZTDF, ErrMsgMissingEncryptionInfo)
 	}
 
 	encInfo := tdo.Manifest.EncryptionInformation
 	if len(encInfo.KeyAccess) == 0 {
-		return nil, fmt.Errorf("invalid ZTDF: no key access objects")
+		return nil, fmt.Errorf("%s: %s", ErrMsgInvalidZTDF, ErrMsgNoKeyAccessObjects)
 	}
 
 	kao := encInfo.KeyAccess[0]
@@ -210,7 +211,7 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 	}
 
 	// Step 3: Unwrap DEK using Key Access Server
-	dek, err := c.unwrapDEK(ctx, wrappedKey, opts.Resource, encInfo.Policy, opts.Context)
+	dek, err := c.unwrapDEK(ctx, opts.ClientID, wrappedKey, opts.Resource, encInfo.Policy, opts.Context)
 	if err != nil {
 		return nil, err
 	}
@@ -218,13 +219,13 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 	// Step 4: Verify policy binding (if requested)
 	if opts.VerifyPolicy && kao.PolicyBinding != nil {
 		if err := VerifyPolicyBinding(dek, encInfo.Policy, kao.PolicyBinding.Hash); err != nil {
-			return nil, fmt.Errorf("policy verification failed: %w", err)
+			return nil, fmt.Errorf("%s: %w", ErrMsgPolicyVerificationFailed, err)
 		}
 	}
 
 	// Step 5: Decrypt payload
 	if tdo.Payload == nil {
-		return nil, fmt.Errorf("invalid ZTDF: missing payload")
+		return nil, fmt.Errorf("%s: %s", ErrMsgInvalidZTDF, ErrMsgMissingPayload)
 	}
 
 	ivBase64 := encInfo.Method.Iv
@@ -243,7 +244,7 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 		expectedHash, err := base64.StdEncoding.DecodeString(encInfo.IntegrityInformation.RootSignature.Sig)
 		if err == nil {
 			if err := VerifyPayloadHash(tdo.Payload.Data, expectedHash); err != nil {
-				return nil, fmt.Errorf("integrity verification failed: %w", err)
+				return nil, fmt.Errorf("%s: %w", ErrMsgIntegrityVerificationFailed, err)
 			}
 		}
 	}
@@ -290,7 +291,7 @@ func (c *Client) UnwrapFile(ctx context.Context, inputPath, outputPath string, o
 		return err
 	}
 
-	if err := os.WriteFile(outputPath, plaintext, 0644); err != nil {
+	if err := os.WriteFile(outputPath, plaintext, DefaultFileMode); err != nil {
 		return fmt.Errorf("failed to write output file: %w", err)
 	}
 
@@ -298,8 +299,7 @@ func (c *Client) UnwrapFile(ctx context.Context, inputPath, outputPath string, o
 }
 
 // wrapDEK wraps a DEK using the Key Access Server
-func (c *Client) wrapDEK(ctx context.Context, dek []byte, resource, policy string, contextMap map[string]string) ([]byte, string, error) {
-	clientID := "sdk-client" // Default client ID
+func (c *Client) wrapDEK(ctx context.Context, clientID string, dek []byte, resource, policy string, contextMap map[string]string) ([]byte, string, error) {
 	if c.stratiumClient.Config().OIDC != nil {
 		clientID = c.stratiumClient.Config().OIDC.ClientID
 	}
@@ -309,98 +309,117 @@ func (c *Client) wrapDEK(ctx context.Context, dek []byte, resource, policy strin
 		ResourceAttributes: map[string]string{"name": resource},
 		Purpose:            "encryption",
 		Context:            contextMap,
+		DEK:                dek,
+		Policy:             policy,
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to wrap DEK: %w", err)
+		return nil, "", fmt.Errorf("%s: %w", ErrMsgFailedToWrapDEK, err)
 	}
 
 	return resp.WrappedDEK, resp.KeyID, nil
 }
 
 // unwrapDEK unwraps a DEK using the Key Access Server
-func (c *Client) unwrapDEK(ctx context.Context, wrappedDEK []byte, resource, policy string, contextMap map[string]string) ([]byte, error) {
-	clientID := "sdk-client" // Default client ID
+func (c *Client) unwrapDEK(ctx context.Context, clientID string, wrappedDEK []byte, resource, policy string, contextMap map[string]string) ([]byte, error) {
 	if c.stratiumClient.Config().OIDC != nil {
 		clientID = c.stratiumClient.Config().OIDC.ClientID
 	}
 
 	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, clientID, wrappedDEK)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unwrap DEK: %w", err)
+		return nil, fmt.Errorf("%s: %w", ErrMsgFailedToUnwrapDEK, err)
 	}
 
 	return dek, nil
 }
 
 // createManifest creates a ZTDF manifest
-func (c *Client) createManifest(wrappedDEK []byte, keyID, policyBase64, policyBindingHash string, iv, encryptedPayload, plaintext, payloadHash []byte) *models.Manifest {
-	return &models.Manifest{
-		Assertions: []*models.Assertion{
-			{
-				Id:             uuid.New().String(),
-				Type:           models.Assertion_HANDLING,
-				Scope:          models.Assertion_TDO,
-				AppliesToState: models.AppliesTo_CIPHERTEXT,
-				Statement: &models.Assertion_Statement{
-					Format: models.Assertion_Statement_JSON_STRUCTURED,
-					JsonValue: `{
-						"classification": "UNCLASSIFIED",
-						"handling": "CONTROLLED"
-					}`,
-				},
-				Binding: &models.Assertion_AssertionBinding{
-					Method:    "jws",
-					Signature: "placeholder-signature",
-				},
-			},
-		},
-		EncryptionInformation: &models.EncryptionInformation{
-			Type: models.EncryptionInformation_SPLIT,
-			KeyAccess: []*models.EncryptionInformation_KeyAccessObject{
+func (c *Client) createManifest(baseline *models.Manifest, wrappedDEK []byte, keyID, policyBase64, policyBindingHash string, iv, encryptedPayload, plaintext, payloadHash []byte) *models.Manifest {
+	if baseline == nil {
+		baseline = &models.Manifest{
+			Assertions: []*models.Assertion{
 				{
-					Type:       models.EncryptionInformation_KeyAccessObject_WRAPPED,
-					Url:        c.keyAccessURL,
-					Protocol:   models.EncryptionInformation_KeyAccessObject_KAS,
-					WrappedKey: base64.StdEncoding.EncodeToString(wrappedDEK),
-					Sid:        uuid.New().String(),
-					Kid:        keyID,
-					PolicyBinding: &models.EncryptionInformation_KeyAccessObject_PolicyBinding{
-						Alg:  "HS256",
-						Hash: policyBindingHash,
+					Id:             uuid.New().String(),
+					Type:           models.Assertion_HANDLING,
+					Scope:          models.Assertion_TDO,
+					AppliesToState: models.AppliesTo_CIPHERTEXT,
+					Statement: &models.Assertion_Statement{
+						Format: models.Assertion_Statement_JSON_STRUCTURED,
+						JsonValue: fmt.Sprintf(`{
+						"classification": %s,
+						"handling": %s
+					}`, DefaultClassification, DefaultHandling),
 					},
-					TdfSpecVersion: "4.0.0",
+					Binding: &models.Assertion_AssertionBinding{
+						Method:    AlgorithmJWS,
+						Signature: PlaceholderSignature,
+					},
 				},
 			},
-			Method: &models.EncryptionInformation_Method{
-				Algorithm:    "AES-256-GCM",
-				IsStreamable: false,
-				Iv:           base64.StdEncoding.EncodeToString(iv),
-			},
-			IntegrityInformation: &models.EncryptionInformation_IntegrityInformation{
-				RootSignature: &models.EncryptionInformation_IntegrityInformation_RootSignature{
-					Alg: "HS256",
-					Sig: base64.StdEncoding.EncodeToString(payloadHash),
-				},
-				SegmentHashAlg:              "GMAC",
-				SegmentSizeDefault:          int32(len(encryptedPayload)),
-				EncryptedSegmentSizeDefault: int32(len(encryptedPayload)),
-				Segments: []*models.EncryptionInformation_IntegrityInformation_Segment{
+			EncryptionInformation: &models.EncryptionInformation{
+				Type: models.EncryptionInformation_SPLIT,
+				KeyAccess: []*models.EncryptionInformation_KeyAccessObject{
 					{
-						Hash:                 base64.StdEncoding.EncodeToString(payloadHash),
-						SegmentSize:          int32(len(plaintext)),
-						EncryptedSegmentSize: int32(len(encryptedPayload)),
+						Type:       models.EncryptionInformation_KeyAccessObject_WRAPPED,
+						Url:        c.keyAccessURL,
+						Protocol:   models.EncryptionInformation_KeyAccessObject_KAS,
+						WrappedKey: base64.StdEncoding.EncodeToString(wrappedDEK),
+						Sid:        uuid.New().String(),
+						Kid:        keyID,
+						PolicyBinding: &models.EncryptionInformation_KeyAccessObject_PolicyBinding{
+							Alg:  AlgorithmHS256,
+							Hash: policyBindingHash,
+						},
+						TdfSpecVersion: TDFSpecVersion,
 					},
 				},
+				Method: &models.EncryptionInformation_Method{
+					Algorithm:    AlgorithmAES256GCM,
+					IsStreamable: false,
+					Iv:           base64.StdEncoding.EncodeToString(iv),
+				},
+				IntegrityInformation: &models.EncryptionInformation_IntegrityInformation{
+					RootSignature: &models.EncryptionInformation_IntegrityInformation_RootSignature{
+						Alg: AlgorithmHS256,
+						Sig: base64.StdEncoding.EncodeToString(payloadHash),
+					},
+					SegmentHashAlg:              AlgorithmGMAC,
+					SegmentSizeDefault:          int32(len(encryptedPayload)),
+					EncryptedSegmentSizeDefault: int32(len(encryptedPayload)),
+					Segments: []*models.EncryptionInformation_IntegrityInformation_Segment{
+						{
+							Hash:                 base64.StdEncoding.EncodeToString(payloadHash),
+							SegmentSize:          int32(len(plaintext)),
+							EncryptedSegmentSize: int32(len(encryptedPayload)),
+						},
+					},
+				},
+				Policy: policyBase64,
 			},
-			Policy: policyBase64,
-		},
-		Payload: &models.PayloadReference{
-			Type:           "reference",
-			Url:            "0.payload",
-			Protocol:       "zip",
-			IsEncrypted:    true,
-			MimeType:       "application/octet-stream",
-			TdfSpecVersion: "4.0.0",
-		},
+			Payload: &models.PayloadReference{
+				Type:           TypeReference,
+				Url:            PayloadFileName,
+				Protocol:       ProtocolZIP,
+				IsEncrypted:    true,
+				MimeType:       MIMETypeOctetStream,
+				TdfSpecVersion: TDFSpecVersion,
+			},
+		}
 	}
+	for _, keyAccess := range baseline.EncryptionInformation.KeyAccess {
+		keyAccess.WrappedKey = base64.StdEncoding.EncodeToString(wrappedDEK)
+		keyAccess.Kid = keyID
+		keyAccess.PolicyBinding.Hash = policyBindingHash
+	}
+
+	baseline.EncryptionInformation.Method.Iv = base64.StdEncoding.EncodeToString(iv)
+	baseline.EncryptionInformation.IntegrityInformation.RootSignature.Sig = base64.StdEncoding.EncodeToString(payloadHash)
+
+	for _, segment := range baseline.EncryptionInformation.IntegrityInformation.Segments {
+		segment.Hash = base64.StdEncoding.EncodeToString(payloadHash)
+		segment.SegmentSize = int32(len(plaintext))
+		segment.EncryptedSegmentSize = int32(len(encryptedPayload))
+	}
+
+	return baseline
 }

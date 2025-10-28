@@ -27,6 +27,8 @@ type DEKRequest struct {
 	ResourceAttributes map[string]string // Attributes of the resource to encrypt
 	Purpose            string            // Purpose of the key (e.g., "encryption", "backup")
 	Context            map[string]string // Additional context
+	DEK                []byte            // DEK bytes
+	Policy             string            // Encoded Base64 Policy
 }
 
 // DEKResponse contains the issued data encryption key.
@@ -48,6 +50,11 @@ func newKeyAccessClient(conn *grpc.ClientConn, config *Config, auth *authManager
 		auth:   auth,
 		client: keyaccess.NewKeyAccessServiceClient(conn),
 	}
+}
+
+// helper returns an auth helper for this client
+func (c *KeyAccessClient) helper() *authHelper {
+	return newAuthHelper(c.config, c.auth)
 }
 
 // RequestDEK requests a data encryption key for encrypting a resource.
@@ -75,35 +82,31 @@ func newKeyAccessClient(conn *grpc.ClientConn, config *Config, auth *authManager
 //	// Use dek.DEK to encrypt data
 //	// Store dek.WrappedDEK alongside encrypted data
 func (c *KeyAccessClient) RequestDEK(ctx context.Context, req *DEKRequest) (*DEKResponse, error) {
+	// Validate request
 	if req == nil {
-		return nil, fmt.Errorf("request cannot be nil")
+		return nil, ErrRequestNil
 	}
 	if req.ClientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 	if len(req.ResourceAttributes) == 0 {
-		return nil, fmt.Errorf("resource_attributes are required")
+		return nil, ErrResourceAttributesRequired
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// Call gRPC service to wrap DEK
 	resp, err := c.client.WrapDEK(ctx, &keyaccess.WrapDEKRequest{
 		Resource: req.ClientID, // Use client ID as resource identifier
-		Dek:      []byte{},     // Empty for new DEK generation
+		Dek:      req.DEK,
 		Action:   req.Purpose,
 		Context:  req.Context,
+		Policy:   req.Policy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to wrap DEK: %w", err)
@@ -136,25 +139,20 @@ func (c *KeyAccessClient) RequestDEK(ctx context.Context, req *DEKRequest) (*DEK
 //
 //	dek, err := client.KeyAccess.UnwrapDEK(ctx, "my-app", wrappedDEK)
 func (c *KeyAccessClient) UnwrapDEK(ctx context.Context, clientID string, wrappedDEK []byte) ([]byte, error) {
+	// Validate request
 	if clientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 	if len(wrappedDEK) == 0 {
-		return nil, fmt.Errorf("wrapped_dek cannot be empty")
+		return nil, NewValidationError("wrapped_dek", "cannot be empty")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// Call gRPC service to unwrap DEK
 	resp, err := c.client.UnwrapDEK(ctx, &keyaccess.UnwrapDEKRequest{

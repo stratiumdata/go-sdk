@@ -82,6 +82,11 @@ func newPlatformClient(conn *grpc.ClientConn, config *Config, auth *authManager)
 	}
 }
 
+// helper returns an auth helper for this client
+func (c *PlatformClient) helper() *authHelper {
+	return newAuthHelper(c.config, c.auth)
+}
+
 // GetDecision makes an authorization decision for the given request.
 //
 // This is the primary method for checking if a subject (user/client) is
@@ -115,37 +120,28 @@ func newPlatformClient(conn *grpc.ClientConn, config *Config, auth *authManager)
 //	    log.Printf("Access denied: %s", decision.Reason)
 //	}
 func (c *PlatformClient) GetDecision(ctx context.Context, req *AuthorizationRequest) (*AuthorizationResponse, error) {
+	// Validate request
 	if req == nil {
-		return nil, fmt.Errorf("request cannot be nil")
+		return nil, ErrRequestNil
 	}
 	if req.Action == "" {
-		return nil, fmt.Errorf("action is required")
+		return nil, ErrActionRequired
 	}
 	if len(req.SubjectAttributes) == 0 {
-		return nil, fmt.Errorf("subject_attributes are required")
+		return nil, ErrSubjectAttributesRequired
 	}
 
 	// Validate subject has an identifier
-	if _, ok := req.SubjectAttributes["sub"]; !ok {
-		if _, ok := req.SubjectAttributes["user_id"]; !ok {
-			if _, ok := req.SubjectAttributes["id"]; !ok {
-				return nil, fmt.Errorf("subject_attributes must contain 'sub', 'user_id', or 'id'")
-			}
-		}
+	if err := validateSubjectIdentifier(req.SubjectAttributes); err != nil {
+		return nil, err
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// Convert subject attributes to structpb.Value map
 	subjectAttrs, err := stringMapToStructMap(req.SubjectAttributes)
@@ -184,31 +180,22 @@ func (c *PlatformClient) GetDecision(ctx context.Context, req *AuthorizationRequ
 //	    "sub": "user123",
 //	})
 func (c *PlatformClient) GetEntitlements(ctx context.Context, subjectAttributes map[string]string) ([]*Entitlement, error) {
+	// Validate request
 	if len(subjectAttributes) == 0 {
-		return nil, fmt.Errorf("subject_attributes are required")
+		return nil, ErrSubjectAttributesRequired
 	}
 
 	// Validate subject has an identifier
-	if _, ok := subjectAttributes["sub"]; !ok {
-		if _, ok := subjectAttributes["user_id"]; !ok {
-			if _, ok := subjectAttributes["id"]; !ok {
-				return nil, fmt.Errorf("subject_attributes must contain 'sub', 'user_id', or 'id'")
-			}
-		}
+	if err := validateSubjectIdentifier(subjectAttributes); err != nil {
+		return nil, err
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// TODO: Call gRPC service
 	// resp, err := c.client.GetEntitlements(ctx, &platform.GetEntitlementsRequest{...})

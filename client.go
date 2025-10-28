@@ -16,7 +16,7 @@ type Client struct {
 	Platform   *PlatformClient
 	KeyManager *KeyManagerClient
 	KeyAccess  *KeyAccessClient
-	PAP        *PAPClient
+	//PAP        *PAPClient
 
 	// Authentication
 	auth *authManager
@@ -117,9 +117,9 @@ func (c *Client) connect() error {
 	}
 
 	// Connect to PAP service (HTTP-based)
-	if c.config.PAPAddress != "" {
-		c.PAP = newPAPClient(c.config, c.auth)
-	}
+	//if c.config.PAPAddress != "" {
+	//	c.PAP = newPAPClient(c.config, c.auth)
+	//}
 
 	return nil
 }

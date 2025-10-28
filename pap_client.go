@@ -76,6 +76,18 @@ func newPAPClient(config *Config, auth *authManager) *PAPClient {
 	}
 }
 
+// getToken retrieves the auth token if authentication is configured
+func (c *PAPClient) getToken(ctx context.Context) (string, error) {
+	if c.auth == nil {
+		return "", nil
+	}
+	token, err := c.auth.GetToken(ctx)
+	if err != nil {
+		return "", NewAuthenticationError("failed to get auth token", err)
+	}
+	return token, nil
+}
+
 // CreatePolicy creates a new policy.
 //
 // Example:
@@ -90,20 +102,18 @@ func newPAPClient(config *Config, auth *authManager) *PAPClient {
 //	    Enabled:       true,
 //	})
 func (c *PAPClient) CreatePolicy(ctx context.Context, policy *Policy) (*Policy, error) {
+	// Validate request
 	if policy == nil {
-		return nil, fmt.Errorf("policy cannot be nil")
+		return nil, NewValidationError("policy", "cannot be nil")
 	}
 	if policy.Name == "" {
-		return nil, fmt.Errorf("policy name is required")
+		return nil, NewValidationError("policy.name", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(policy)
@@ -111,14 +121,14 @@ func (c *PAPClient) CreatePolicy(ctx context.Context, policy *Policy) (*Policy, 
 		return nil, fmt.Errorf("failed to marshal policy: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/policies", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+PAPPoliciesPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", ContentTypeJSON)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -146,26 +156,24 @@ func (c *PAPClient) CreatePolicy(ctx context.Context, policy *Policy) (*Policy, 
 //
 //	policy, err := client.PAP.GetPolicy(ctx, "policy-123")
 func (c *PAPClient) GetPolicy(ctx context.Context, policyID string) (*Policy, error) {
+	// Validate request
 	if policyID == "" {
-		return nil, fmt.Errorf("policy_id is required")
+		return nil, NewValidationError("policy_id", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/api/v1/policies/%s", c.baseURL, policyID), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s/%s", c.baseURL, PAPPoliciesPath, policyID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -193,22 +201,19 @@ func (c *PAPClient) GetPolicy(ctx context.Context, policyID string) (*Policy, er
 //
 //	policies, err := client.PAP.ListPolicies(ctx)
 func (c *PAPClient) ListPolicies(ctx context.Context) ([]*Policy, error) {
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/policies", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+PAPPoliciesPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -237,20 +242,18 @@ func (c *PAPClient) ListPolicies(ctx context.Context) ([]*Policy, error) {
 //	policy.Enabled = false
 //	updated, err := client.PAP.UpdatePolicy(ctx, policy)
 func (c *PAPClient) UpdatePolicy(ctx context.Context, policy *Policy) (*Policy, error) {
+	// Validate request
 	if policy == nil {
-		return nil, fmt.Errorf("policy cannot be nil")
+		return nil, NewValidationError("policy", "cannot be nil")
 	}
 	if policy.ID == "" {
-		return nil, fmt.Errorf("policy ID is required")
+		return nil, NewValidationError("policy.id", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(policy)
@@ -258,14 +261,14 @@ func (c *PAPClient) UpdatePolicy(ctx context.Context, policy *Policy) (*Policy, 
 		return nil, fmt.Errorf("failed to marshal policy: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%s/api/v1/policies/%s", c.baseURL, policy.ID), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "PUT", fmt.Sprintf("%s%s/%s", c.baseURL, PAPPoliciesPath, policy.ID), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", ContentTypeJSON)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -293,26 +296,24 @@ func (c *PAPClient) UpdatePolicy(ctx context.Context, policy *Policy) (*Policy, 
 //
 //	err := client.PAP.DeletePolicy(ctx, "policy-123")
 func (c *PAPClient) DeletePolicy(ctx context.Context, policyID string) error {
+	// Validate request
 	if policyID == "" {
-		return fmt.Errorf("policy_id is required")
+		return NewValidationError("policy_id", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s/api/v1/policies/%s", c.baseURL, policyID), nil)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s%s/%s", c.baseURL, PAPPoliciesPath, policyID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -345,20 +346,18 @@ func (c *PAPClient) DeletePolicy(ctx context.Context, policyID string) error {
 //	    Enabled: true,
 //	})
 func (c *PAPClient) CreateEntitlement(ctx context.Context, entitlement *EntitlementCreate) (*EntitlementResponse, error) {
+	// Validate request
 	if entitlement == nil {
-		return nil, fmt.Errorf("entitlement cannot be nil")
+		return nil, NewValidationError("entitlement", "cannot be nil")
 	}
 	if entitlement.Name == "" {
-		return nil, fmt.Errorf("entitlement name is required")
+		return nil, NewValidationError("entitlement.name", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	body, err := json.Marshal(entitlement)
@@ -366,14 +365,14 @@ func (c *PAPClient) CreateEntitlement(ctx context.Context, entitlement *Entitlem
 		return nil, fmt.Errorf("failed to marshal entitlement: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/v1/entitlements", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+PAPEntitlementsPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", ContentTypeJSON)
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -401,26 +400,24 @@ func (c *PAPClient) CreateEntitlement(ctx context.Context, entitlement *Entitlem
 //
 //	entitlement, err := client.PAP.GetEntitlement(ctx, "entitlement-123")
 func (c *PAPClient) GetEntitlement(ctx context.Context, entitlementID string) (*EntitlementResponse, error) {
+	// Validate request
 	if entitlementID == "" {
-		return nil, fmt.Errorf("entitlement_id is required")
+		return nil, NewValidationError("entitlement_id", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/api/v1/entitlements/%s", c.baseURL, entitlementID), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s/%s", c.baseURL, PAPEntitlementsPath, entitlementID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -448,22 +445,19 @@ func (c *PAPClient) GetEntitlement(ctx context.Context, entitlementID string) (*
 //
 //	entitlements, err := client.PAP.ListEntitlements(ctx)
 func (c *PAPClient) ListEntitlements(ctx context.Context) ([]*EntitlementResponse, error) {
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/entitlements", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+PAPEntitlementsPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -491,26 +485,24 @@ func (c *PAPClient) ListEntitlements(ctx context.Context) ([]*EntitlementRespons
 //
 //	err := client.PAP.DeleteEntitlement(ctx, "entitlement-123")
 func (c *PAPClient) DeleteEntitlement(ctx context.Context, entitlementID string) error {
+	// Validate request
 	if entitlementID == "" {
-		return fmt.Errorf("entitlement_id is required")
+		return NewValidationError("entitlement_id", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth token
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s/api/v1/entitlements/%s", c.baseURL, entitlementID), nil)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", fmt.Sprintf("%s%s/%s", c.baseURL, PAPEntitlementsPath, entitlementID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", AuthHeaderPrefix+token)
 	}
 
 	resp, err := c.httpClient.Do(req)

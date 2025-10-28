@@ -91,6 +91,11 @@ func newKeyManagerClient(conn *grpc.ClientConn, config *Config, auth *authManage
 	}
 }
 
+// helper returns an auth helper for this client
+func (c *KeyManagerClient) helper() *authHelper {
+	return newAuthHelper(c.config, c.auth)
+}
+
 // RegisterKey registers a new client public key with the Key Manager.
 //
 // This should be called once per client to register their public key for
@@ -104,30 +109,23 @@ func newKeyManagerClient(conn *grpc.ClientConn, config *Config, auth *authManage
 //	    KeyType:      stratium.KeyTypeRSA4096,
 //	})
 func (c *KeyManagerClient) RegisterKey(ctx context.Context, req *RegisterKeyRequest) (*ClientKey, error) {
+	// Validate request
 	if req == nil {
-		return nil, fmt.Errorf("request cannot be nil")
+		return nil, ErrRequestNil
 	}
 	if req.ClientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 	if req.PublicKeyPEM == "" {
-		return nil, fmt.Errorf("public_key_pem is required")
+		return nil, NewValidationError("public_key_pem", "is required")
 	}
 
-	// Get authentication token
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	// Add timeout and auth context
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// Parse expiration time if provided
 	var expiresAt *timestamppb.Timestamp
@@ -176,28 +174,23 @@ func (c *KeyManagerClient) RegisterKey(ctx context.Context, req *RegisterKeyRequ
 //	    KeyID:    "key-12345",
 //	})
 func (c *KeyManagerClient) GetKey(ctx context.Context, req *GetKeyRequest) (*ClientKey, error) {
+	// Validate request
 	if req == nil {
-		return nil, fmt.Errorf("request cannot be nil")
+		return nil, ErrRequestNil
 	}
 	if req.ClientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 	if req.KeyID == "" {
-		return nil, fmt.Errorf("key_id is required")
+		return nil, NewValidationError("key_id", "is required")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// Call gRPC service
 	resp, err := c.client.GetClientKey(ctx, &keymanager.GetClientKeyRequest{
@@ -238,28 +231,23 @@ func (c *KeyManagerClient) GetKey(ctx context.Context, req *GetKeyRequest) (*Cli
 //	}
 //	// Store result.Ciphertext and result.WrappedDEK
 func (c *KeyManagerClient) EncryptData(ctx context.Context, clientID, keyID string, plaintext []byte) (*EncryptionResult, error) {
+	// Validate request
 	if clientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 	if keyID == "" {
-		return nil, fmt.Errorf("key_id is required")
+		return nil, NewValidationError("key_id", "is required")
 	}
 	if len(plaintext) == 0 {
-		return nil, fmt.Errorf("plaintext cannot be empty")
+		return nil, NewValidationError("plaintext", "cannot be empty")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// TODO: Call gRPC service
 	// resp, err := c.client.EncryptData(ctx, &keymanager.EncryptDataRequest{...})
@@ -282,34 +270,29 @@ func (c *KeyManagerClient) EncryptData(ctx context.Context, clientID, keyID stri
 //	    EncryptionAlg: "AES-256-GCM",
 //	})
 func (c *KeyManagerClient) DecryptData(ctx context.Context, req *DecryptionRequest) ([]byte, error) {
+	// Validate request
 	if req == nil {
-		return nil, fmt.Errorf("request cannot be nil")
+		return nil, ErrRequestNil
 	}
 	if req.ClientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 	if req.KeyID == "" {
-		return nil, fmt.Errorf("key_id is required")
+		return nil, NewValidationError("key_id", "is required")
 	}
 	if len(req.Ciphertext) == 0 {
-		return nil, fmt.Errorf("ciphertext cannot be empty")
+		return nil, NewValidationError("ciphertext", "cannot be empty")
 	}
 	if len(req.WrappedDEK) == 0 {
-		return nil, fmt.Errorf("wrapped_dek cannot be empty")
+		return nil, NewValidationError("wrapped_dek", "cannot be empty")
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// TODO: Call gRPC service
 	// resp, err := c.client.DecryptData(ctx, &keymanager.DecryptDataRequest{...})
@@ -323,22 +306,17 @@ func (c *KeyManagerClient) DecryptData(ctx context.Context, req *DecryptionReque
 //
 //	keys, err := client.KeyManager.ListKeys(ctx, "my-app", false)
 func (c *KeyManagerClient) ListKeys(ctx context.Context, clientID string, includeRevoked bool) ([]*ClientKey, error) {
+	// Validate request
 	if clientID == "" {
-		return nil, fmt.Errorf("client_id is required")
+		return nil, ErrClientIDRequired
 	}
 
-	token := ""
-	if c.auth != nil {
-		var err error
-		token, err = c.auth.GetToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get auth token: %w", err)
-		}
+	// Get auth context
+	ctx, cancel, _, err := c.helper().getTokenAndContext(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	ctx, cancel := c.config.contextWithTimeout(ctx)
 	defer cancel()
-	ctx = contextWithAuth(ctx, token)
 
 	// Call gRPC service
 	resp, err := c.client.ListClientKeys(ctx, &keymanager.ListClientKeysRequest{
