@@ -40,6 +40,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/google/uuid"
@@ -176,19 +177,13 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 //
 // Example:
 //
-//	plaintext, err := client.Unwrap(ctx, tdo, &ztdf.UnwrapOptions{
-//	    Resource:        "document-123",
-//	    VerifyIntegrity: true,
-//	    VerifyPolicy:    true,
-//	})
+//		plaintext, err := client.Unwrap(ctx, tdo, &ztdf.UnwrapOptions{
+//		    Resource:        "document-123",
+//	     ClientKeyID:     key.KeyID,
+//		    VerifyIntegrity: true,
+//		    VerifyPolicy:    true,
+//		})
 func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *UnwrapOptions) ([]byte, error) {
-	if opts == nil {
-		opts = &UnwrapOptions{
-			VerifyIntegrity: true,
-			VerifyPolicy:    true,
-		}
-	}
-
 	// Step 1: Validate manifest
 	if tdo.Manifest == nil || tdo.Manifest.EncryptionInformation == nil {
 		return nil, fmt.Errorf("%s: %s", ErrMsgInvalidZTDF, ErrMsgMissingEncryptionInfo)
@@ -208,9 +203,20 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 	}
 
 	// Step 3: Unwrap DEK using Key Access Server
-	dek, err := c.unwrapDEK(ctx, opts, kao.Kid, wrappedKey, encInfo.Policy)
+	encryptedDEK, err := c.unwrapDEK(ctx, opts, kao.Kid, wrappedKey, encInfo.Policy)
 	if err != nil {
 		return nil, err
+	}
+
+	// Step 4: Decrypt DEK with private key
+	privateKey, err := GetRSAPrivateKeyFromFile(opts.ClientPrivateKeyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	dek, err := DecryptDEKWithRSAPrivateKey(privateKey, encryptedDEK)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Step 4: Verify policy binding (if requested)

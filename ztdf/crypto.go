@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,26 @@ func SaveRSAPrivateKey(privateKey *rsa.PrivateKey, dir string, filename string) 
 		Bytes: privateKeyBytes,
 	})
 	return os.WriteFile(privateKeyPath, privateKeyPEM, 0600)
+}
+
+// GetRSAPrivateKeyFromFile gets private key from file
+func GetRSAPrivateKeyFromFile(filename string) (*rsa.PrivateKey, error) {
+	privateKeyPEM, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read private key file: %v", err)
+	}
+
+	block, _ := pem.Decode(privateKeyPEM)
+	if block == nil {
+		return nil, errors.New("failed to decode PEM block")
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %v", err)
+	}
+
+	return privateKey, nil
 }
 
 // RSAPublicKeyToPEM converts public key to PEM format
@@ -125,7 +146,7 @@ func DecryptPayload(ciphertext, dek, iv []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// EncryptDEKWithPublicKey encrypts a DEK using RSA-OAEP with SHA-256.
+// EncryptDEKWithRSAPublicKey encrypts a DEK using RSA-OAEP with SHA-256.
 // Used to encrypt the DEK with the client's public key.
 //
 // Example:
@@ -134,7 +155,7 @@ func DecryptPayload(ciphertext, dek, iv []byte) ([]byte, error) {
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-func EncryptDEKWithPublicKey(publicKey *rsa.PublicKey, dek []byte) ([]byte, error) {
+func EncryptDEKWithRSAPublicKey(publicKey *rsa.PublicKey, dek []byte) ([]byte, error) {
 	encryptedDEK, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, publicKey, dek, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt DEK with public key: %w", err)
@@ -142,7 +163,7 @@ func EncryptDEKWithPublicKey(publicKey *rsa.PublicKey, dek []byte) ([]byte, erro
 	return encryptedDEK, nil
 }
 
-// DecryptDEKWithPrivateKey decrypts a DEK using RSA-OAEP with SHA-256.
+// DecryptDEKWithRSAPrivateKey decrypts a DEK using RSA-OAEP with SHA-256.
 // Used to decrypt the DEK with the client's private key.
 //
 // Example:
@@ -151,7 +172,7 @@ func EncryptDEKWithPublicKey(publicKey *rsa.PublicKey, dek []byte) ([]byte, erro
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-func DecryptDEKWithPrivateKey(privateKey *rsa.PrivateKey, encryptedDEK []byte) ([]byte, error) {
+func DecryptDEKWithRSAPrivateKey(privateKey *rsa.PrivateKey, encryptedDEK []byte) ([]byte, error) {
 	dek, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, privateKey, encryptedDEK, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt DEK with private key: %w", err)

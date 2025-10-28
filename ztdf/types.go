@@ -36,6 +36,9 @@ type UnwrapOptions struct {
 	// Key ID for the Client
 	ClientKeyID string
 
+	// Client private key path
+	ClientPrivateKeyPath string
+
 	// Whether to verify payload integrity (default: true)
 	VerifyIntegrity bool
 
