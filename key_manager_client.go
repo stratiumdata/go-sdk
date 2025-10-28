@@ -27,15 +27,15 @@ type KeyManagerClient struct {
 type KeyType int32
 
 const (
-	KeyTypeRSA2048   KeyType = 0
-	KeyTypeRSA3072   KeyType = 1
-	KeyTypeRSA4096   KeyType = 2
-	KeyTypeECC256    KeyType = 3
-	KeyTypeECC384    KeyType = 4
-	KeyTypeECC521    KeyType = 5
-	KeyTypeKyber512  KeyType = 6
-	KeyTypeKyber768  KeyType = 7
-	KeyTypeKyber1024 KeyType = 8
+	KeyTypeRSA2048   KeyType = 1
+	KeyTypeRSA3072   KeyType = 2
+	KeyTypeRSA4096   KeyType = 3
+	KeyTypeECC256    KeyType = 4
+	KeyTypeECC384    KeyType = 5
+	KeyTypeECC521    KeyType = 6
+	KeyTypeKyber512  KeyType = 7
+	KeyTypeKyber768  KeyType = 8
+	KeyTypeKyber1024 KeyType = 9
 )
 
 // ClientKey represents a registered client public key.
