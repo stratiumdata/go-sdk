@@ -138,7 +138,7 @@ func (c *KeyAccessClient) RequestDEK(ctx context.Context, req *DEKRequest) (*DEK
 // Example:
 //
 //	dek, err := client.KeyAccess.UnwrapDEK(ctx, "my-app", wrappedDEK)
-func (c *KeyAccessClient) UnwrapDEK(ctx context.Context, clientID string, wrappedDEK []byte) ([]byte, error) {
+func (c *KeyAccessClient) UnwrapDEK(ctx context.Context, clientID, clientKid, kid string, wrappedDEK []byte, policy string) ([]byte, error) {
 	// Validate request
 	if clientID == "" {
 		return nil, ErrClientIDRequired
@@ -156,9 +156,12 @@ func (c *KeyAccessClient) UnwrapDEK(ctx context.Context, clientID string, wrappe
 
 	// Call gRPC service to unwrap DEK
 	resp, err := c.client.UnwrapDEK(ctx, &keyaccess.UnwrapDEKRequest{
-		Resource:   clientID,
-		WrappedDek: wrappedDEK,
-		Action:     "decrypt",
+		Resource:    clientID,
+		WrappedDek:  wrappedDEK,
+		KeyId:       kid,
+		ClientKeyId: clientKid,
+		Action:      "unwrap_dek",
+		Policy:      policy,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to unwrap DEK: %w", err)

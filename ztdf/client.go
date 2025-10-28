@@ -208,7 +208,7 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 	}
 
 	// Step 3: Unwrap DEK using Key Access Server
-	dek, err := c.unwrapDEK(ctx, opts.ClientID, wrappedKey)
+	dek, err := c.unwrapDEK(ctx, opts, kao.Kid, wrappedKey, encInfo.Policy)
 	if err != nil {
 		return nil, err
 	}
@@ -317,12 +317,12 @@ func (c *Client) wrapDEK(ctx context.Context, clientID string, dek []byte, resou
 }
 
 // unwrapDEK unwraps a DEK using the Key Access Server
-func (c *Client) unwrapDEK(ctx context.Context, clientID string, wrappedDEK []byte) ([]byte, error) {
+func (c *Client) unwrapDEK(ctx context.Context, cfg *UnwrapOptions, kid string, wrappedDEK []byte, policy string) ([]byte, error) {
 	if c.stratiumClient.Config().OIDC != nil {
-		clientID = c.stratiumClient.Config().OIDC.ClientID
+		cfg.ClientID = c.stratiumClient.Config().OIDC.ClientID
 	}
 
-	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, clientID, wrappedDEK)
+	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, cfg.ClientID, cfg.ClientKeyID, kid, wrappedDEK, policy)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ErrMsgFailedToUnwrapDEK, err)
 	}

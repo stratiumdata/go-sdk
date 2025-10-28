@@ -33,6 +33,9 @@ type UnwrapOptions struct {
 	// OIDC Client ID
 	ClientID string
 
+	// Key ID for the Client
+	ClientKeyID string
+
 	// Whether to verify payload integrity (default: true)
 	VerifyIntegrity bool
 
