@@ -10,7 +10,7 @@ type WrapOptions struct {
 	ClientID string
 
 	// Resource identifier for ABAC policy evaluation
-	Resource string
+	ResourceAttributes map[string]string
 
 	// Data attributes for policy (optional, defaults will be provided)
 	Attributes []Attribute
@@ -33,17 +33,11 @@ type UnwrapOptions struct {
 	// OIDC Client ID
 	ClientID string
 
-	// Resource identifier for ABAC policy evaluation
-	Resource string
-
 	// Whether to verify payload integrity (default: true)
 	VerifyIntegrity bool
 
 	// Whether to verify policy binding (default: true)
 	VerifyPolicy bool
-
-	// Additional context for key access
-	Context map[string]string
 }
 
 // Attribute represents a data attribute for ZTDF policy

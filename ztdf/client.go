@@ -101,8 +101,8 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 			IntegrityCheck: true,
 		}
 	}
-	if opts.Resource == "" {
-		opts.Resource = DefaultResourceName
+	if len(opts.ResourceAttributes) == 0 {
+		opts.ResourceAttributes = map[string]string{"name": DefaultResourceName}
 	}
 
 	// Step 1: Generate DEK
@@ -132,7 +132,7 @@ func (c *Client) Wrap(ctx context.Context, plaintext []byte, opts *WrapOptions) 
 	policyBindingHash := CalculatePolicyBinding(dek, policyBase64)
 
 	// Step 5: Wrap DEK using Key Access Server
-	wrappedDEK, keyID, err := c.wrapDEK(ctx, opts.ClientID, dek, opts.Resource, policyBase64, opts.Context)
+	wrappedDEK, keyID, err := c.wrapDEK(ctx, opts.ClientID, dek, opts.ResourceAttributes, policyBase64, opts.Context)
 	if err != nil {
 		return nil, err
 	}
@@ -188,9 +188,6 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 			VerifyPolicy:    true,
 		}
 	}
-	if opts.Resource == "" {
-		opts.Resource = DefaultResourceName
-	}
 
 	// Step 1: Validate manifest
 	if tdo.Manifest == nil || tdo.Manifest.EncryptionInformation == nil {
@@ -211,7 +208,7 @@ func (c *Client) Unwrap(ctx context.Context, tdo *TrustedDataObject, opts *Unwra
 	}
 
 	// Step 3: Unwrap DEK using Key Access Server
-	dek, err := c.unwrapDEK(ctx, opts.ClientID, wrappedKey, opts.Resource, encInfo.Policy, opts.Context)
+	dek, err := c.unwrapDEK(ctx, opts.ClientID, wrappedKey)
 	if err != nil {
 		return nil, err
 	}
@@ -299,14 +296,14 @@ func (c *Client) UnwrapFile(ctx context.Context, inputPath, outputPath string, o
 }
 
 // wrapDEK wraps a DEK using the Key Access Server
-func (c *Client) wrapDEK(ctx context.Context, clientID string, dek []byte, resource, policy string, contextMap map[string]string) ([]byte, string, error) {
+func (c *Client) wrapDEK(ctx context.Context, clientID string, dek []byte, resourceAttributes map[string]string, policy string, contextMap map[string]string) ([]byte, string, error) {
 	if c.stratiumClient.Config().OIDC != nil {
 		clientID = c.stratiumClient.Config().OIDC.ClientID
 	}
 
 	resp, err := c.stratiumClient.KeyAccess.RequestDEK(ctx, &stratium.DEKRequest{
 		ClientID:           clientID,
-		ResourceAttributes: map[string]string{"name": resource},
+		ResourceAttributes: resourceAttributes,
 		Purpose:            "encryption",
 		Context:            contextMap,
 		DEK:                dek,
@@ -320,7 +317,7 @@ func (c *Client) wrapDEK(ctx context.Context, clientID string, dek []byte, resou
 }
 
 // unwrapDEK unwraps a DEK using the Key Access Server
-func (c *Client) unwrapDEK(ctx context.Context, clientID string, wrappedDEK []byte, resource, policy string, contextMap map[string]string) ([]byte, error) {
+func (c *Client) unwrapDEK(ctx context.Context, clientID string, wrappedDEK []byte) ([]byte, error) {
 	if c.stratiumClient.Config().OIDC != nil {
 		clientID = c.stratiumClient.Config().OIDC.ClientID
 	}
