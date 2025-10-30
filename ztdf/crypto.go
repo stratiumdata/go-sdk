@@ -3,6 +3,8 @@ package ztdf
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
+	"crypto/ecdsa"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
@@ -12,8 +14,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/crypto/hkdf"
 )
 
 // GenerateRSAKeyPair generates an RSA key pair for the client
@@ -70,6 +75,142 @@ func RSAPublicKeyToPEM(publicKey *rsa.PublicKey) (string, error) {
 		Type:  "PUBLIC KEY",
 		Bytes: publicKeyBytes,
 	})
+	return string(publicKeyPEM), nil
+}
+
+// GenerateECCKeyPair generates an ECC key pair for the client.
+// Supported curves: "P-256" (NIST P-256) and "P-384" (NIST P-384).
+//
+// Example:
+//
+//	privateKey, err := ztdf.GenerateECCKeyPair("P-256")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func GenerateECCKeyPair(curve string) (*ecdh.PrivateKey, error) {
+	var c ecdh.Curve
+
+	switch curve {
+	case "P-256":
+		c = ecdh.P256()
+	case "P-384":
+		c = ecdh.P384()
+	default:
+		return nil, fmt.Errorf("unsupported curve: %s (supported: P-256, P-384)", curve)
+	}
+
+	privateKey, err := c.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ECC key pair: %w", err)
+	}
+
+	return privateKey, nil
+}
+
+// SaveECCPrivateKey saves ECC private key to file in PKCS#8 PEM format.
+//
+// Example:
+//
+//	err := ztdf.SaveECCPrivateKey(privateKey, "./keys", "client.key")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func SaveECCPrivateKey(privateKey *ecdh.PrivateKey, dir string, filename string) error {
+	privateKeyPath := filepath.Join(dir, filename)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("failed to create keys directory: %w", err)
+	}
+
+	// Marshal to PKCS#8 format
+	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ECC private key: %w", err)
+	}
+
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	})
+
+	return os.WriteFile(privateKeyPath, privateKeyPEM, 0600)
+}
+
+// GetECCPrivateKeyFromFile loads an ECC private key from a PEM file.
+//
+// Example:
+//
+//	privateKey, err := ztdf.GetECCPrivateKeyFromFile("./keys/client.key")
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func GetECCPrivateKeyFromFile(filename string) (*ecdh.PrivateKey, error) {
+	privateKeyPEM, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read private key file: %v", err)
+	}
+
+	block, _ := pem.Decode(privateKeyPEM)
+	if block == nil {
+		return nil, errors.New("failed to decode PEM block")
+	}
+
+	// Parse as PKCS#8 (which supports ECC)
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %v", err)
+	}
+
+	// Check if it's already an *ecdh.PrivateKey
+	if ecdhKey, ok := key.(*ecdh.PrivateKey); ok {
+		return ecdhKey, nil
+	}
+
+	// x509.ParsePKCS8PrivateKey may return *ecdsa.PrivateKey for ECC keys
+	// Convert it to *ecdh.PrivateKey using the raw key bytes
+	ecdsaKey, ok := key.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("key is not an ECC private key, got type %T", key)
+	}
+
+	// Determine the curve and create ecdh.PrivateKey from raw bytes
+	var curve ecdh.Curve
+	switch ecdsaKey.Curve.Params().Name {
+	case "P-256":
+		curve = ecdh.P256()
+	case "P-384":
+		curve = ecdh.P384()
+	default:
+		return nil, fmt.Errorf("unsupported curve: %s", ecdsaKey.Curve.Params().Name)
+	}
+
+	// Convert ecdsa key to ecdh key using raw bytes
+	ecdhKey, err := curve.NewPrivateKey(ecdsaKey.D.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert ecdsa key to ecdh: %w", err)
+	}
+
+	return ecdhKey, nil
+}
+
+// ECCPublicKeyToPEM converts an ECC public key to PEM format.
+//
+// Example:
+//
+//	publicKeyPEM, err := ztdf.ECCPublicKeyToPEM(privateKey.PublicKey())
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func ECCPublicKeyToPEM(publicKey *ecdh.PublicKey) (string, error) {
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ECC public key: %w", err)
+	}
+
+	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	})
+
 	return string(publicKeyPEM), nil
 }
 
@@ -177,6 +318,136 @@ func DecryptDEKWithRSAPrivateKey(privateKey *rsa.PrivateKey, encryptedDEK []byte
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt DEK with private key: %w", err)
 	}
+	return dek, nil
+}
+
+// EncryptDEKWithECCPublicKey encrypts a DEK using ECIES (Elliptic Curve Integrated Encryption Scheme).
+// Uses ECDH for key agreement, HKDF-SHA256 for key derivation, and AES-256-GCM for encryption.
+//
+// The returned ciphertext format is:
+// [ephemeral public key length (1 byte)][ephemeral public key][nonce (12 bytes)][ciphertext]
+//
+// Example:
+//
+//	encryptedDEK, err := ztdf.EncryptDEKWithECCPublicKey(publicKey, dek)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func EncryptDEKWithECCPublicKey(publicKey *ecdh.PublicKey, dek []byte) ([]byte, error) {
+	// Generate ephemeral key pair using the same curve as the recipient's public key
+	curve := publicKey.Curve()
+	ephemeralPrivateKey, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate ephemeral key: %w", err)
+	}
+
+	// Perform ECDH to get shared secret
+	sharedSecret, err := ephemeralPrivateKey.ECDH(publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform ECDH: %w", err)
+	}
+
+	// Derive encryption key using HKDF-SHA256
+	hkdfReader := hkdf.New(sha256.New, sharedSecret, nil, []byte("ztdf-ecies-v1"))
+	derivedKey := make([]byte, 32) // AES-256 key
+	if _, err := io.ReadFull(hkdfReader, derivedKey); err != nil {
+		return nil, fmt.Errorf("failed to derive key: %w", err)
+	}
+
+	// Encrypt DEK with AES-256-GCM
+	block, err := aes.NewCipher(derivedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	ciphertext := gcm.Seal(nil, nonce, dek, nil)
+
+	// Package result: [ephemeral public key length][ephemeral public key][nonce][ciphertext]
+	ephemeralPublicKeyBytes := ephemeralPrivateKey.PublicKey().Bytes()
+	result := make([]byte, 0, 1+len(ephemeralPublicKeyBytes)+len(nonce)+len(ciphertext))
+	result = append(result, byte(len(ephemeralPublicKeyBytes)))
+	result = append(result, ephemeralPublicKeyBytes...)
+	result = append(result, nonce...)
+	result = append(result, ciphertext...)
+
+	return result, nil
+}
+
+// DecryptDEKWithECCPrivateKey decrypts a DEK using ECIES (Elliptic Curve Integrated Encryption Scheme).
+// Uses ECDH for key agreement, HKDF-SHA256 for key derivation, and AES-256-GCM for decryption.
+//
+// The input ciphertext format must be:
+// [ephemeral public key length (1 byte)][ephemeral public key][nonce (12 bytes)][ciphertext]
+//
+// Example:
+//
+//	dek, err := ztdf.DecryptDEKWithECCPrivateKey(privateKey, encryptedDEK)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+func DecryptDEKWithECCPrivateKey(privateKey *ecdh.PrivateKey, encryptedDEK []byte) ([]byte, error) {
+	// Parse encrypted blob
+	if len(encryptedDEK) < 1 {
+		return nil, errors.New("encrypted DEK too short")
+	}
+
+	// Extract ephemeral public key
+	ephemeralPublicKeyLen := int(encryptedDEK[0])
+	if len(encryptedDEK) < 1+ephemeralPublicKeyLen+12 {
+		return nil, errors.New("encrypted DEK format invalid")
+	}
+
+	ephemeralPublicKeyBytes := encryptedDEK[1 : 1+ephemeralPublicKeyLen]
+	curve := privateKey.Curve()
+	ephemeralPublicKey, err := curve.NewPublicKey(ephemeralPublicKeyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ephemeral public key: %w", err)
+	}
+
+	// Extract nonce and ciphertext
+	nonceStart := 1 + ephemeralPublicKeyLen
+	nonce := encryptedDEK[nonceStart : nonceStart+12]
+	ciphertext := encryptedDEK[nonceStart+12:]
+
+	// Perform ECDH to get shared secret
+	sharedSecret, err := privateKey.ECDH(ephemeralPublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform ECDH: %w", err)
+	}
+
+	// Derive encryption key using HKDF-SHA256
+	hkdfReader := hkdf.New(sha256.New, sharedSecret, nil, []byte("ztdf-ecies-v1"))
+	derivedKey := make([]byte, 32) // AES-256 key
+	if _, err := io.ReadFull(hkdfReader, derivedKey); err != nil {
+		return nil, fmt.Errorf("failed to derive key: %w", err)
+	}
+
+	// Decrypt DEK with AES-256-GCM
+	block, err := aes.NewCipher(derivedKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	dek, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decryption failed: %w", err)
+	}
+
 	return dek, nil
 }
 
