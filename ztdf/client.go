@@ -48,11 +48,19 @@ import (
 	"github.com/stratiumdata/go-sdk/gen/models"
 )
 
+// keyAccessProvider defines the interface for key access operations needed by the ZTDF client.
+// This interface allows for dependency injection and testing.
+type keyAccessProvider interface {
+	RequestDEK(ctx context.Context, req *stratium.DEKRequest) (*stratium.DEKResponse, error)
+	UnwrapDEK(ctx context.Context, resource, clientKeyID, keyID string, wrappedDEK []byte, policy string) ([]byte, error)
+}
+
 // Client provides high-level methods for working with ZTDF files.
 // It integrates with the Stratium SDK to handle key management and access control.
 type Client struct {
 	stratiumClient *stratium.Client
 	keyAccessURL   string
+	keyAccess      keyAccessProvider // for dependency injection in tests
 }
 
 // NewClient creates a new ZTDF client using a Stratium SDK client.
@@ -302,7 +310,13 @@ func (c *Client) wrapDEK(ctx context.Context, resource string, dek []byte, resou
 		return nil, "", fmt.Errorf("%s: %s", ErrMsgFailedToWrapDEK, "resource identifier cannot be empty")
 	}
 
-	resp, err := c.stratiumClient.KeyAccess.RequestDEK(ctx, &stratium.DEKRequest{
+	// Use injected keyAccess for testing, or stratiumClient.KeyAccess for production
+	keyAccess := c.keyAccess
+	if keyAccess == nil {
+		keyAccess = c.stratiumClient.KeyAccess
+	}
+
+	resp, err := keyAccess.RequestDEK(ctx, &stratium.DEKRequest{
 		Resource:           resource,
 		ResourceAttributes: resourceAttributes,
 		Purpose:            "encryption",
@@ -323,7 +337,13 @@ func (c *Client) unwrapDEK(ctx context.Context, cfg *UnwrapOptions, kid string, 
 		return nil, fmt.Errorf("%s: %s", ErrMsgFailedToUnwrapDEK, "resource identifier cannot be empty")
 	}
 
-	dek, err := c.stratiumClient.KeyAccess.UnwrapDEK(ctx, cfg.Resource, cfg.ClientKeyID, kid, wrappedDEK, policy)
+	// Use injected keyAccess for testing, or stratiumClient.KeyAccess for production
+	keyAccess := c.keyAccess
+	if keyAccess == nil {
+		keyAccess = c.stratiumClient.KeyAccess
+	}
+
+	dek, err := keyAccess.UnwrapDEK(ctx, cfg.Resource, cfg.ClientKeyID, kid, wrappedDEK, policy)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", ErrMsgFailedToUnwrapDEK, err)
 	}

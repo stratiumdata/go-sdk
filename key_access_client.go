@@ -16,7 +16,7 @@ import (
 type KeyAccessClient struct {
 	conn   *grpc.ClientConn
 	config *Config
-	auth   *authManager
+	auth   tokenProvider
 
 	client keyaccess.KeyAccessServiceClient
 }
@@ -43,7 +43,7 @@ type DEKResponse struct {
 }
 
 // newKeyAccessClient creates a new Key Access client.
-func newKeyAccessClient(conn *grpc.ClientConn, config *Config, auth *authManager) *KeyAccessClient {
+func newKeyAccessClient(conn *grpc.ClientConn, config *Config, auth tokenProvider) *KeyAccessClient {
 	return &KeyAccessClient{
 		conn:   conn,
 		config: config,

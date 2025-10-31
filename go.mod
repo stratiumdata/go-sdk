@@ -1,6 +1,8 @@
 module github.com/stratiumdata/go-sdk
 
-go 1.24.0
+go 1.25.0
+
+toolchain go1.25.3
 
 require (
 	github.com/coreos/go-oidc/v3 v3.16.0

@@ -5,14 +5,19 @@ import (
 	"fmt"
 )
 
+// tokenProvider is an interface for types that can provide authentication tokens
+type tokenProvider interface {
+	GetToken(ctx context.Context) (string, error)
+}
+
 // authHelper encapsulates common authentication patterns used across service clients
 type authHelper struct {
 	config *Config
-	auth   *authManager
+	auth   tokenProvider
 }
 
 // newAuthHelper creates a new authentication helper
-func newAuthHelper(config *Config, auth *authManager) *authHelper {
+func newAuthHelper(config *Config, auth tokenProvider) *authHelper {
 	return &authHelper{
 		config: config,
 		auth:   auth,

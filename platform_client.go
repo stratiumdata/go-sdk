@@ -16,7 +16,7 @@ import (
 type PlatformClient struct {
 	conn   *grpc.ClientConn
 	config *Config
-	auth   *authManager
+	auth   tokenProvider
 	client platform.PlatformServiceClient
 }
 
@@ -24,9 +24,10 @@ type PlatformClient struct {
 type Decision int32
 
 const (
-	DecisionDeny        Decision = 0
+	DecisionUnspecified Decision = 0
 	DecisionAllow       Decision = 1
-	DecisionConditional Decision = 2
+	DecisionDeny        Decision = 2
+	DecisionConditional Decision = 3
 )
 
 // AuthorizationRequest contains the parameters for an authorization decision.
@@ -73,7 +74,7 @@ type Condition struct {
 }
 
 // newPlatformClient creates a new Platform client.
-func newPlatformClient(conn *grpc.ClientConn, config *Config, auth *authManager) *PlatformClient {
+func newPlatformClient(conn *grpc.ClientConn, config *Config, auth tokenProvider) *PlatformClient {
 	return &PlatformClient{
 		conn:   conn,
 		config: config,

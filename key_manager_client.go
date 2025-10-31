@@ -19,7 +19,7 @@ import (
 type KeyManagerClient struct {
 	conn   *grpc.ClientConn
 	config *Config
-	auth   *authManager
+	auth   tokenProvider
 	client keymanager.KeyManagerServiceClient
 }
 
@@ -82,7 +82,7 @@ type DecryptionRequest struct {
 }
 
 // newKeyManagerClient creates a new Key Manager client.
-func newKeyManagerClient(conn *grpc.ClientConn, config *Config, auth *authManager) *KeyManagerClient {
+func newKeyManagerClient(conn *grpc.ClientConn, config *Config, auth tokenProvider) *KeyManagerClient {
 	return &KeyManagerClient{
 		conn:   conn,
 		config: config,

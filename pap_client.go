@@ -15,7 +15,7 @@ import (
 // for CRUD operations on policies and entitlements.
 type PAPClient struct {
 	config     *Config
-	auth       *authManager
+	auth       tokenProvider
 	httpClient *http.Client
 	baseURL    string
 }
@@ -65,7 +65,7 @@ type EntitlementResponse struct {
 }
 
 // newPAPClient creates a new PAP client.
-func newPAPClient(config *Config, auth *authManager) *PAPClient {
+func newPAPClient(config *Config, auth tokenProvider) *PAPClient {
 	return &PAPClient{
 		config:  config,
 		auth:    auth,
